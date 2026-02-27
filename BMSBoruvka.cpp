@@ -1,381 +1,469 @@
+/*
+ * BMSBoruvka.cpp
+ *
+ * ── Complexity Summary (Sparse Graph Case: m = O(n)) ───────────────
+ *
+ *   Parameters:
+ *       t = ⌈log^{2/3}(n)⌉
+ *       P = ⌈log(n) / t⌉ = O(log^{1/3}(n))
+ *
+ *   Component shrinkage:
+ *       C_0 = n
+ *       C_{i+1} ≤ C_i / 2^t
+ *       (Each super-step performs t Borůvka rounds,
+ *        and each round at least halves the number of components.)
+ *
+ *   Sparse graph assumption:
+ *       m_i ≤ C_i
+ *       (Average degree per super-node remains O(1).)
+ *
+ *   Total edge volume across super-steps:
+ *       Σ m_i ≤ Σ C_i
+ *              = n · Σ_{i=0}^{P-1} 2^{-it}
+ *              = n / (1 - 2^{-t})
+ *              = O(n)
+ *
+ *   Phase B total cost:
+ *       t · Σ m_i
+ *       = O(t · n)
+ *       = O(n · log^{2/3}(n))    ← dominant term
+ *
+ *   Phase C total cost:
+ *       Σ m_i = O(n)
+ *
+ *   origToComp maintenance cost:
+ *       O(n · P) = O(n · log^{1/3}(n))
+ *
+ *   Overall complexity:
+ *       O(n · log^{2/3}(n))
+ */
+
 #include <bits/stdc++.h>
 using namespace std;
 
-struct Edge {
+// ════════════════════════════════════════════════════════════════
+// Basic Types
+// ════════════════════════════════════════════════════════════════
+struct Edge { int u, v; long long w; };
+
+struct CompEdge {
     int u, v;
     long long w;
+    int orig_eidx;
 };
 
+static inline bool edgeLess(const CompEdge& A, const CompEdge& B) {
+    if (A.w != B.w) return A.w < B.w;
+    int au=min(A.u,A.v), av=max(A.u,A.v), bu=min(B.u,B.v), bv=max(B.u,B.v);
+    if (au != bu) return au < bu;
+    if (av != bv) return av < bv;
+    return A.orig_eidx < B.orig_eidx;
+}
+
+
+// ════════════════════════════════════════════════════════════════
+// Integer Counting Sort
+// Precondition: Edge weights are integers (long long) and
+//               the range R = maxW - minW + 1 is reasonably bounded.
+// Time Complexity: O(m + R).
+// If R exceeds a predefined threshold, the implementation
+// falls back to std::sort to avoid excessive memory usage.
+// ════════════════════════════════════════════════════════════════
+static void countingSortEdges(std::vector<Edge>& edges) {
+    if (edges.size() <= 1) return;
+
+    long long minW = edges[0].w, maxW = edges[0].w;
+    for (const auto& e : edges) {
+        if (e.w < minW) minW = e.w;
+        if (e.w > maxW) maxW = e.w;
+    }
+
+    // Compute number of buckets (careful about overflow)
+    unsigned long long rangeULL = (unsigned long long)(maxW - minW) + 1ULL;
+
+    // Bucket threshold: 50,000,000 buckets
+    // ≈ 200MB memory usage for int counters (excluding output buffer).
+    // This value may be tuned according to available system memory.
+    constexpr unsigned long long MAX_BUCKETS = 50000000ULL;
+
+    auto tieLess = [](const Edge& a, const Edge& b) {
+        if (a.w != b.w) return a.w < b.w;
+        int au = std::min(a.u, a.v), av = std::max(a.u, a.v);
+        int bu = std::min(b.u, b.v), bv = std::max(b.u, b.v);
+        if (au != bu) return au < bu;
+        return av < bv;
+    };
+
+    if (rangeULL > MAX_BUCKETS) {
+        // Fallback to std::sort to prevent out-of-memory (OOM) issues.
+        std::sort(edges.begin(), edges.end(), tieLess);
+        return;
+    }
+
+    const size_t R = (size_t)rangeULL;
+    std::vector<int> cnt(R, 0);
+
+    // Counting
+    for (const auto& e : edges) {
+        size_t idx = (size_t)(e.w - minW);
+        ++cnt[idx];
+    }
+
+    // Prefix sum
+    for (size_t i = 1; i < R; ++i) cnt[i] += cnt[i - 1];
+
+    // Stable output construction (traverse from right to left)
+    std::vector<Edge> out(edges.size());
+    for (int i = (int)edges.size() - 1; i >= 0; --i) {
+        const auto& e = edges[(size_t)i];
+        size_t idx = (size_t)(e.w - minW);
+        out[(size_t)(--cnt[idx])] = e;
+    }
+
+    // For each segment with identical weight w, apply tie-break sorting
+    // to preserve full consistency with the original comparator.
+    // Counting sort guarantees ordering by weight only;
+    // the original implementation additionally orders by
+    // (min(u,v), max(u,v)) as a tie-break rule.
+    //
+    // We therefore sort each equal-weight segment locally.
+    // Total cost: Σ k_w log k_w.
+    // If many edges share the same weight, this introduces extra overhead.
+    size_t start = 0;
+    while (start < out.size()) {
+        size_t end = start + 1;
+        while (end < out.size() && out[end].w == out[start].w) ++end;
+        if (end - start > 1) {
+            std::sort(out.begin() + (ptrdiff_t)start, out.begin() + (ptrdiff_t)end, tieLess);
+        }
+        start = end;
+    }
+
+    edges.swap(out);
+}
+
+// ════════════════════════════════════════════════════════════════
+// Disjoint Set Union (DSU)
+// Optimized with path halving and union by rank
+// Amortized time per operation: nearly O(α(n))
+// ════════════════════════════════════════════════════════════════
 struct DSU {
     vector<int> p, r;
-    int comps;
+    int comps = 0;
 
-    DSU(int n=0){ init(n); }
-    void init(int n){
-        p.resize(n);
-        r.assign(n,0);
+    void init(int n) {
+        p.resize(n); r.assign(n, 0);
         iota(p.begin(), p.end(), 0);
         comps = n;
     }
-    int find(int x){
-        while(p[x]!=x){
-            p[x] = p[p[x]]; // path compression (halving)
-            x = p[x];
-        }
+    int find(int x) {
+        while (p[x] != x) { p[x] = p[p[x]]; x = p[x]; }
         return x;
     }
-    bool unite(int a,int b){
+    pair<int,int> unite(int a, int b) {
         a = find(a); b = find(b);
-        if(a==b) return false;
-        if(r[a] < r[b]) swap(a,b);
-        p[b]=a;
-        if(r[a]==r[b]) r[a]++;
+        if (a == b) return {-1, -1};
+        if (r[a] < r[b]) swap(a, b);
+        p[b] = a;
+        if (r[a] == r[b]) r[a]++;
         comps--;
-        return true;
+        return {a, b};
     }
 };
 
-static inline bool betterEdge(const Edge& A, const Edge& B){
-    // deterministic tie-breaker
-    if(A.w != B.w) return A.w < B.w;
-    int au = min(A.u, A.v), av = max(A.u, A.v);
-    int bu = min(B.u, B.v), bv = max(B.u, B.v);
-    if(au != bu) return au < bu;
-    return av < bv;
-}
+// ════════════════════════════════════════════════════════════════
+// Graph Compressor  [Optimization 1 + Optimization 3]
+//
+// Optimization 1:
+//   Eliminate sorting of compressed edges.
+//   Since boruvkaRound performs a full scan and does not
+//   rely on edge ordering, sorting is redundant.
+//   Improves per-step cost from O(m_i log m_i) to O(m_i).
+//
+// Optimization 3:
+//   Implement rootToNew as a reusable vector<int>.
+//   Avoids reconstructing unordered_map<int,int> at each compression.
+//   Achieves O(C_i) direct access with lower constant factors.
+// ════════════════════════════════════════════════════════════════
+struct GraphCompressor {
+    vector<int> rootToNew;  // Maps oldRoot → new ID; unused entries are set to -1
+    vector<int> usedRoots;  // Roots written during this compress call (for reset)
 
-/* ============================================================
-   Candidate structure D:
-   - Update(componentRoot, edgeIndex)
-   - Pull(M): return up to M component roots with smallest candidate weights
-   - BatchPrepend: just bulk Update (prototype)
-   Implementation:
-     - best[compRoot] = current best edge idx (may be stale after unions)
-     - heap stores (weight, compRoot, edgeIdx, stamp)
-     - lazy deletion: only accept heap top if matches current best stamp AND compRoot is still root.
-   ============================================================ */
-struct CandidateD {
-    struct Item{
-        long long w;
-        int comp;
-        int eidx;
-        int stamp;
-        bool operator>(const Item& o) const {
-            if(w != o.w) return w > o.w;
-            if(comp != o.comp) return comp > o.comp;
-            return eidx > o.eidx;
-        }
+    struct Result {
+        int n_nodes;
+        vector<CompEdge> edges;
     };
 
-    const vector<Edge>* edges = nullptr;
-    DSU* dsu = nullptr;
+    Result compress(DSU& uf, const vector<CompEdge>& curEdges) {
+        const int oldSize = (int)uf.p.size();
 
-    unordered_map<int,int> bestEdge;   // compRoot -> edge idx
-    unordered_map<int,int> bestStamp;  // compRoot -> stamp
-    int globalStamp = 1;
-
-    priority_queue<Item, vector<Item>, greater<Item>> pq;
-
-    void init(const vector<Edge>& E, DSU& uf){
-        edges = &E;
-        dsu = &uf;
-        bestEdge.clear();
-        bestStamp.clear();
-        globalStamp = 1;
-        while(!pq.empty()) pq.pop();
-    }
-
-    void update(int compRoot, int edgeIdx){
-        if(!edges) return;
-        // only meaningful if compRoot is still a root at time of update
-        compRoot = dsu->find(compRoot);
-
-        auto it = bestEdge.find(compRoot);
-        if(it == bestEdge.end()){
-            bestEdge[compRoot] = edgeIdx;
-            bestStamp[compRoot] = globalStamp++;
-            pq.push({(*edges)[edgeIdx].w, compRoot, edgeIdx, bestStamp[compRoot]});
-            return;
+        // Expand capacity (only grows, never shrinks; amortized cost O(1))
+        if ((int)rootToNew.size() < oldSize) {
+            rootToNew.assign(oldSize, -1);
         }
-        int curIdx = it->second;
-        const Edge& curE = (*edges)[curIdx];
-        const Edge& newE = (*edges)[edgeIdx];
+        usedRoots.clear();
 
-        if(betterEdge(newE, curE)){
-            bestEdge[compRoot] = edgeIdx;
-            bestStamp[compRoot] = globalStamp++;
-            pq.push({newE.w, compRoot, edgeIdx, bestStamp[compRoot]});
+        // Step 1: Enumerate active roots and build oldRoot → newID mapping
+        //         (O(C_i) direct array writes)
+        int newID = 0;
+        for (int i = 0; i < oldSize; i++) {
+            if (uf.find(i) == i) {
+                rootToNew[i] = newID++;
+                usedRoots.push_back(i);
+            }
         }
-    }
+        const int C = newID;
 
-    void batchPrepend(const vector<pair<int,int>>& compEdgePairs){
-        // Prototype: just bulk update
-        for(auto &p: compEdgePairs) update(p.first, p.second);
-    }
+        // Step 2+3: Traverse current edges, remove internal edges,
+        //           and keep the best edge for each pair (na, nb)
+        unordered_map<uint64_t, CompEdge> best;
+        best.reserve(curEdges.size() * 2);
 
-    vector<int> pull(int M){
-        vector<int> res;
-        res.reserve(M);
-        unordered_set<int> picked;
-        picked.reserve(M*2 + 1);
+        for (const auto& e : curEdges) {
+            int ra = uf.find(e.u), rb = uf.find(e.v);
+            if (ra == rb) continue;
 
-        while((int)res.size() < M && !pq.empty()){
-            auto top = pq.top(); pq.pop();
-            int c = dsu->find(top.comp);
+            int na = rootToNew[ra], nb = rootToNew[rb];
+            if (na > nb) swap(na, nb);
 
-            // component root changed => stale
-            if(c != top.comp) continue;
-
-            // best stamp mismatch => stale
-            auto itS = bestStamp.find(c);
-            if(itS == bestStamp.end() || itS->second != top.stamp) continue;
-
-            // avoid duplicates in one pull
-            if(picked.count(c)) continue;
-
-            res.push_back(c);
-            picked.insert(c);
+            uint64_t key = ((uint64_t)na << 32) | (uint32_t)nb;
+            CompEdge ce{na, nb, e.w, e.orig_eidx};
+            auto it = best.find(key);
+            if (it == best.end() || edgeLess(ce, it->second)) {
+                best[key] = ce;
+            }
         }
+
+        // Step 4: Collect compressed edges
+        Result res;
+        res.n_nodes = C;
+        res.edges.reserve(best.size());
+        for (auto& [k, e] : best) res.edges.push_back(e);
         return res;
     }
 
-    bool empty() const {
-        return bestEdge.empty();
+    // Must be called after origToComp update.
+    // Resets all entries written during this compression to -1.
+    // Time complexity: O(C_i).
+    void resetRootToNew() {
+        for (int r : usedRoots) rootToNew[r] = -1;
     }
 };
 
-/* ============================================================
-   Threshold �� (bucket / layer activation)
-   We'll sort edges by weight.
-   We activate edges in layers: each time we increase ��, we add a new chunk
-   of edges (doubling chunk size). �� is "weight of last activated edge".
+// ════════════════════════════════════════════════════════════════
+// One Borůvka round within a super-step
+// Does not require sorted input; performs a full edge scan
+// Time complexity: O(|edges| + C_i)
+// ════════════════════════════════════════════════════════════════
+static vector<CompEdge> boruvkaRound(
+    const vector<CompEdge>& edges,
+    DSU& uf)
+{
+    const int N = (int)uf.p.size();
+    vector<int> compBest(N, -1);
 
-   activeEnd is index in sorted edges: edges[0..activeEnd-1] are active.
-   NewlyActivatedEdges are edges[oldEnd..newEnd-1].
-   ============================================================ */
-struct ThresholdActivator {
-    const vector<Edge>* E = nullptr;
-    int m = 0;
-    int activeEnd = 0; // [0, activeEnd) active
-    int layer = 0;     // chunk size grows with layer
-    int chunkBase = 0; // initial chunk size
-
-    void init(const vector<Edge>& edges, int initialChunk){
-        E = &edges;
-        m = (int)edges.size();
-        activeEnd = 0;
-        layer = 0;
-        chunkBase = max(1, initialChunk);
+    for (int i = 0; i < (int)edges.size(); i++) {
+        const auto& e = edges[i];
+        int ca = uf.find(e.u), cb = uf.find(e.v);
+        if (ca == cb) continue;
+        if (compBest[ca] < 0 || edgeLess(e, edges[compBest[ca]])) compBest[ca] = i;
+        if (compBest[cb] < 0 || edgeLess(e, edges[compBest[cb]])) compBest[cb] = i;
     }
 
-    // raise threshold: activate more edges; return range [oldEnd, newEnd)
-    pair<int,int> raise(){
-        int oldEnd = activeEnd;
-        long long chunk = 1LL * chunkBase * (1LL << layer);
-        layer++;
-        activeEnd = (int)min<long long>(m, oldEnd + chunk);
-        return {oldEnd, activeEnd};
+    vector<CompEdge> selected;
+    for (int c = 0; c < N; c++) {
+        if (uf.find(c) != c) continue;
+        const int bi = compBest[c];
+        if (bi < 0) continue;
+        const auto& e = edges[bi];
+        int ra = uf.find(e.u), rb = uf.find(e.v);
+        if (ra == rb) continue;
+        auto [nr, dr] = uf.unite(ra, rb);
+        if (nr != -1) selected.push_back(e);
     }
+    return selected;
+}
 
-    bool allActivated() const { return activeEnd >= m; }
-    long long tauValue() const {
-        if(activeEnd <= 0) return LLONG_MIN;
-        return (*E)[activeEnd-1].w;
-    }
-};
+// ════════════════════════════════════════════════════════════════
+// Parameters
+// ════════════════════════════════════════════════════════════════
+static int computeT(int n) {
+    if (n <= 4) return 1;
+    return max(1, (int)ceil(pow(log2((double)n), 2.0/3.0)));
+}
 
-/* ============================================================
-   ValidateCOE(C, ��, UF):
-   - Fast path (lazy): try to use current best candidate edge from D by popping
-     until we find a crossing edge.
-   - If cannot find a valid candidate quickly, do a "refresh scan" over currently
-     active edges to compute the true cheapest outgoing edge for this component,
-     update D, and return it if exists.
+static int computeP(int n, int t) {
+    if (n <= 1) return 0;
+    return max(1, (int)ceil(log2((double)n) / t));
+}
 
-   This keeps correctness for the active edge set, while being a practical prototype.
-   ============================================================ */
+// ════════════════════════════════════════════════════════════════
+// BMSBoruvka
+// ════════════════════════════════════════════════════════════════
 struct BMSBoruvka {
-    int n;
-    vector<Edge> edges; // sorted by weight
-    DSU uf;
-    CandidateD D;
-    ThresholdActivator activator;
+    int n_orig;
+    vector<Edge> edges;
 
-    // progress control
-    int M_pull = 64;              // batch size
-    double progressFrac = 0.25;   // if merged < progressFrac * pulled, raise ��
+    long long mst_weight = 0;
+    vector<int> mst_eidx;
 
-    BMSBoruvka(int n_, vector<Edge> E): n(n_), edges(std::move(E)), uf(n_) {
-        sort(edges.begin(), edges.end(), [](const Edge& a, const Edge& b){
-            if(a.w != b.w) return a.w < b.w;
-            int au=min(a.u,a.v), av=max(a.u,a.v);
-            int bu=min(b.u,b.v), bv=max(b.u,b.v);
-            if(au!=bu) return au<bu;
-            return av<bv;
-        });
-        D.init(edges, uf);
-        activator.init(edges, /*initialChunk*/ max(1, (int)edges.size()/64)); // heuristic
+    int t_rounds;
+    int P_steps;
+
+    explicit BMSBoruvka(int n_, vector<Edge> E)
+        : n_orig(n_), edges(std::move(E))
+    {
+        countingSortEdges(edges);
+        t_rounds = computeT(n_orig);
+        P_steps  = computeP(n_orig, t_rounds);
     }
 
-    // Update D with newly activated edges
-    void feedNewEdges(int oldEnd, int newEnd){
-        for(int i=oldEnd;i<newEnd;i++){
-            int u = edges[i].u, v = edges[i].v;
-            int cu = uf.find(u), cv = uf.find(v);
-            if(cu == cv) continue;
-            D.update(cu, i);
-            D.update(cv, i);
-        }
-    }
+    void run() {
+        mst_weight = 0;
+        mst_eidx.clear();
+        mst_eidx.reserve(n_orig - 1);
 
-    // Refresh scan for component c over active edges: find true min crossing edge
-    // among edges[0..activeEnd-1] (active edges only).
-    int refreshCOE_byScanActive(int c){
-        c = uf.find(c);
-        int best = -1;
-        for(int i=0;i<activator.activeEnd;i++){
-            int u = edges[i].u, v = edges[i].v;
-            int cu = uf.find(u), cv = uf.find(v);
-            if(cu == cv) continue;
-            if(cu != c && cv != c) continue; // not incident to component c
-            if(best == -1 || betterEdge(edges[i], edges[best])) best = i;
-        }
-        if(best != -1) D.update(c, best);
-        return best;
-    }
+        if (n_orig <= 1 || edges.empty()) return;
 
-    // Lazy validate: try current best edge for component c
-    // Return edge index if found, else -1.
-    int validateCOE(int c){
-        c = uf.find(c);
+        const int m = (int)edges.size();
 
-        // Try to use the current best edge recorded in D (if exists)
-        // We'll probe by repeatedly pulling candidates for this component from the heap indirectly:
-        // easiest: do a small "mini-pull" and check.
-        // But D.pull gives distinct comps; here we want just c.
-        // So we do a bounded number of refresh attempts: first scan-based refresh if needed.
+        DSU uf;
+        uf.init(n_orig);
 
-        // 1) If D has some record for c, test it (bestEdge map)
-        auto it = D.bestEdge.find(c);
-        if(it != D.bestEdge.end()){
-            int eidx = it->second;
-            int u = edges[eidx].u, v = edges[eidx].v;
-            int cu = uf.find(u), cv = uf.find(v);
-            if(cu != cv){
-                // ensure this edge is incident to c
-                if(cu == c || cv == c) return eidx;
+        vector<CompEdge> curEdges;
+        curEdges.reserve(m);
+
+        int curActivated = 0;
+        const int edgesPerStep = max(1, m / max(1, P_steps));
+
+        vector<int> origToComp(n_orig);
+        iota(origToComp.begin(), origToComp.end(), 0);
+
+        GraphCompressor compressor;
+
+        for (int step = 0; step < P_steps && uf.comps > 1; step++) {
+
+            // Phase A: Activate edges in nondecreasing weight order
+            // (prefix-based activation to preserve the cut property)
+            const int activateEnd = (step == P_steps - 1)
+                ? m
+                : min(m, curActivated + edgesPerStep);
+
+            for (int i = curActivated; i < activateEnd; i++) {
+                const auto& e = edges[i];
+                // Direct array indexing (Optimization 2);
+                // Component merges within the super-step are resolved via uf.find.
+                int cu = uf.find(origToComp[e.u]);
+                int cv = uf.find(origToComp[e.v]);
+                if (cu == cv) continue;
+                curEdges.push_back({cu, cv, e.w, i});
             }
-        }
+            curActivated = activateEnd;
 
-        // 2) Otherwise do a refresh scan over active edges (correct for active set)
-        int best = refreshCOE_byScanActive(c);
-        return best;
-    }
+            if (curEdges.empty()) continue;
 
-    pair<long long, vector<Edge>> run(){
-        uf.init(n);
-        D.init(edges, uf);
-
-        long long total = 0;
-        vector<Edge> mst;
-        mst.reserve(max(0, n-1));
-
-        // Initial �� activation
-        auto [oldEnd, newEnd] = activator.raise();
-        feedNewEdges(oldEnd, newEnd);
-
-        // Main loop
-        while(uf.comps > 1){
-            // if D is empty (no candidates), we must raise �� (possibly disconnected graph)
-            if(D.pq.empty()){
-                if(activator.allActivated()) break; // cannot progress (disconnected)
-                auto rng = activator.raise();
-                feedNewEdges(rng.first, rng.second);
-                continue;
-            }
-
-            // Pull a batch of components
-            vector<int> S = D.pull(M_pull);
-            if(S.empty()){
-                // candidates were stale; raise �� to inject more edges
-                if(activator.allActivated()) break;
-                auto rng = activator.raise();
-                feedNewEdges(rng.first, rng.second);
-                continue;
-            }
-
-            int merged = 0;
-            vector<pair<int,int>> newly; // (componentRoot, edgeIdx) to batch prepend
-
-            for(int c : S){
-                c = uf.find(c);
-                int eidx = validateCOE(c);
-                if(eidx == -1) continue;
-
-                int u = edges[eidx].u, v = edges[eidx].v;
-                int cu = uf.find(u), cv = uf.find(v);
-                if(cu == cv) continue;
-
-                // union
-                bool ok = uf.unite(cu, cv);
-                if(!ok) continue;
-
-                mst.push_back(edges[eidx]);
-                total += edges[eidx].w;
-                merged++;
-
-                // Local relax (prototype): add candidates using edges adjacent to u and v among active edges
-                // Here we cheaply "re-feed" a small window: just update using this edge for the new root
-                int newRoot = uf.find(u);
-                newly.push_back({newRoot, eidx});
-
-                if((int)mst.size() == n-1) break;
-            }
-
-            // Batch prepend newly discovered candidates
-            D.batchPrepend(newly);
-
-            if((int)mst.size() == n-1) break;
-
-            // Progress check: if not enough merges, raise �� and activate more edges
-            int threshold = max(1, (int)ceil(progressFrac * (double)S.size()));
-            if(merged < threshold){
-                if(!activator.allActivated()){
-                    auto rng = activator.raise();
-                    feedNewEdges(rng.first, rng.second);
-                }else{
-                    // all edges activated; if still low progress, we're likely disconnected or stuck
-                    // We'll continue attempts, but may exit if no improvement.
+            // Phase B: Execute t Borůvka rounds
+            // Each round runs in O(m_i) time
+            for (int round = 0; round < t_rounds && uf.comps > 1; round++) {
+                // Filter internalized edges and update endpoints in-place
+                {
+                    vector<CompEdge> active;
+                    active.reserve(curEdges.size());
+                    for (auto& e : curEdges) {
+                        int ra = uf.find(e.u), rb = uf.find(e.v);
+                        if (ra != rb) { e.u = ra; e.v = rb; active.push_back(e); }
+                    }
+                    curEdges = std::move(active);
                 }
+                if (curEdges.empty()) break;
+
+                vector<CompEdge> selected = boruvkaRound(curEdges, uf);
+                for (const auto& e : selected) {
+                    mst_eidx.push_back(e.orig_eidx);
+                    mst_weight += e.w;
+                }
+
+                if ((int)mst_eidx.size() == n_orig - 1) goto done;
+            }
+
+            if (uf.comps <= 1) break;
+            if ((int)mst_eidx.size() == n_orig - 1) break;
+
+            // Phase C: Graph compression
+            {
+                // Remove remaining intra-component edges from curEdges
+                {
+                    vector<CompEdge> active;
+                    active.reserve(curEdges.size());
+                    for (auto& e : curEdges) {
+                        int ra = uf.find(e.u), rb = uf.find(e.v);
+                        if (ra != rb) { e.u = ra; e.v = rb; active.push_back(e); }
+                    }
+                    curEdges = std::move(active);
+                }
+
+                if (curEdges.empty()) {
+                    continue;
+                }
+
+                // compress O(m_i)
+                auto res = compressor.compress(uf, curEdges);
+
+                // rootToNew remains valid until resetRootToNew() is called
+                for (int origNode = 0; origNode < n_orig; origNode++) {
+                    const int oldComp = origToComp[origNode];
+                    const int oldRoot = uf.find(oldComp);
+                    const int newID   = compressor.rootToNew[oldRoot];
+                    if (newID >= 0) origToComp[origNode] = newID;
+                }
+
+                // Reset rootToNew only after origToComp has been updated (O(C_i)).
+                // This must be done here rather than inside compress(),
+                // otherwise rootToNew would be cleared before the update completes.
+                compressor.resetRootToNew();
+
+                // Rebuild the DSU in the compressed ID space
+                uf.init(res.n_nodes);
+
+                // Update edge set (unordered; does not affect boruvkaRound)
+                curEdges = std::move(res.edges);
             }
         }
 
-        return {total, mst};
+        done:;
+
+        mst_weight = 0;
+        for (int eidx : mst_eidx) mst_weight += edges[eidx].w;
     }
 };
 
-int main(){
+// ════════════════════════════════════════════════════════════════
+// main
+// ════════════════════════════════════════════════════════════════
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+
     int n, m;
     cin >> n >> m;
+
     vector<Edge> E;
     E.reserve(m);
-
-    // Input format: u v w (0-indexed). If 1-indexed, subtract 1.
-    for(int i=0;i<m;i++){
-        int u,v; long long w;
+    for (int i = 0; i < m; i++) {
+        int u, v; long long w;
         cin >> u >> v >> w;
-        E.push_back({u,v,w});
+        E.push_back({u, v, w});
     }
 
-    BMSBoruvka solver(n, E);
-    auto [total, mst] = solver.run();
+    BMSBoruvka solver(n, std::move(E));
+    solver.run();
 
-    cout << "Total weight = " << total << "\n";
-    cout << "Edges in MST/MSF (" << mst.size() << "):\n";
-    for(auto &e : mst){
+    cout << "Total weight = " << solver.mst_weight << "\n";
+    cout << "MST/MSF edges (" << solver.mst_eidx.size() << "):\n";
+    for (int eidx : solver.mst_eidx) {
+        const auto& e = solver.edges[eidx];
         cout << e.u << " " << e.v << " " << e.w << "\n";
     }
 
     return 0;
 }
-
