@@ -61,12 +61,14 @@ BIN_DIR    = SCRIPT_DIR
 DATA_DIR   = SCRIPT_DIR / "data"
 
 SOURCES = {
-    "boruvka":    SCRIPT_DIR / "boruvka.cpp",
-    "parallel":   SCRIPT_DIR / "parallel_boruvka.cpp",
-    "bms":        SCRIPT_DIR / "BMSBoruvka.cpp",
-    "bms_xi":     SCRIPT_DIR / "bms_instrumented.cpp",
-    "boruvka_xi": SCRIPT_DIR / "boruvka_xi.cpp",
-    "gen":        SCRIPT_DIR / "gen.cpp",
+    "boruvka":        SCRIPT_DIR / "boruvka.cpp",
+    "parallel":       SCRIPT_DIR / "parallel_boruvka.cpp",
+    "bms":            SCRIPT_DIR / "BMSBoruvka.cpp",
+    "bms_xi":         SCRIPT_DIR / "bms_instrumented.cpp",
+    "boruvka_xi":     SCRIPT_DIR / "boruvka_xi.cpp",
+    "kruskal":        SCRIPT_DIR / "kruskal.cpp",
+    "filter_kruskal": SCRIPT_DIR / "filter_kruskal.cpp",
+    "gen":            SCRIPT_DIR / "gen.cpp",
 }
 
 # ── Test cases ─────────────────────────────────────────────────────────────────
@@ -82,6 +84,11 @@ TEST_CASES = [
     ("dense_100k", 100_000,   5_000_000, []),
     ("1m_ties",  1_000_000,   5_000_000, ["--weights", "uniform"]),
     ("1m_small", 1_000_000,   5_000_000, ["--weights", "small"]),
+    # roadNet-CA: pre-converted from SNAP via convert_snap.py
+    # n=1,965,206  m=2,766,607  (real-world sparse graph, m ≈ 1.4n)
+    # Generate with:  python3 convert_snap.py roadNet-CA.txt --output data/test_roadnet_ca.txt
+    # Then add to TEST_CASES by uncommenting the line below:
+    # ("roadnet_ca", 1_965_206, 2_766_607, []),   # real-world; use --sizes roadnet_ca
 ]
 
 COMPILE_FLAGS = ["-O2", "-std=c++17"]
@@ -169,6 +176,12 @@ def build_all(par_threads):
          [str(SOURCES["bms"]),    "-o", str(BIN_DIR / "bms")],
          "bms"),
         (["g++"] + COMPILE_FLAGS +
+         [str(SOURCES["kruskal"]), "-o", str(BIN_DIR / "kruskal")],
+         "kruskal"),
+        (["g++"] + COMPILE_FLAGS +
+         [str(SOURCES["filter_kruskal"]), "-o", str(BIN_DIR / "filter_kruskal")],
+         "filter_kruskal"),
+        (["g++"] + COMPILE_FLAGS +
          [str(SOURCES["bms_xi"]), "-o", str(BIN_DIR / "bms_xi")],
          "bms_xi"),
         (["g++"] + COMPILE_FLAGS +
@@ -206,21 +219,25 @@ def generate_data(cases, seed):
 
 
 # ── Algorithm list ─────────────────────────────────────────────────────────────
-def make_timing_bins(par_threads):
+def make_timing_bins(par_threads, include_par=True):
     """
     Returns list of (label, cmd, env_overrides).
     par_T2, par_T4, … set OMP_NUM_THREADS accordingly.
+    Set include_par=False to omit parallel Borůvka (e.g. on single-core machines).
     """
     bins = [
-        ("boruvka", [str(BIN_DIR / "boruvka")], {}),
-        ("bms",     [str(BIN_DIR / "bms")],     {}),
+        ("boruvka",        [str(BIN_DIR / "boruvka")],        {}),
+        ("kruskal",        [str(BIN_DIR / "kruskal")],        {}),
+        ("filter_kruskal", [str(BIN_DIR / "filter_kruskal")], {}),
+        ("bms",            [str(BIN_DIR / "bms")],            {}),
     ]
-    for t in par_threads:
-        bins.append((
-            f"par_T{t}",
-            [str(BIN_DIR / "parallel_boruvka")],
-            {"OMP_NUM_THREADS": str(t)},
-        ))
+    if include_par:
+        for t in par_threads:
+            bins.append((
+                f"par_T{t}",
+                [str(BIN_DIR / "parallel_boruvka")],
+                {"OMP_NUM_THREADS": str(t)},
+            ))
     return bins
 
 
@@ -613,8 +630,8 @@ def parse_args():
                    help="Compile all binaries before running")
     p.add_argument("--gen",          action="store_true",
                    help="Generate test data before running")
-    p.add_argument("--target-sec",   type=float, default=30.0,
-                   help="Total timing budget per size in seconds (default 30)")
+    p.add_argument("--target-sec",   type=float, default=60.0,
+                   help="Total timing budget per size in seconds (default 60)")
     p.add_argument("--min-trials",   type=int,   default=3,
                    help="Minimum timed trials per algorithm (default 3)")
     p.add_argument("--max-trials",   type=int,   default=60,
@@ -633,6 +650,12 @@ def parse_args():
                    help="Number of ξ collection repeats per size (default 3)")
     p.add_argument("--seed",         type=int,   default=42,
                    help="Random seed for gen (default 42)")
+    p.add_argument("--n-seeds",      type=int,   default=1,
+                   help="Number of independent graph instances per (n,m) config (default 1). "
+                        "Seeds used: seed, seed+1, ..., seed+n_seeds-1. "
+                        "Results are averaged across instances.")
+    p.add_argument("--no-par",       action="store_true",
+                   help="Exclude parallel Borůvka from timing (useful on single-core machines)")
     return p.parse_args()
 
 
@@ -651,7 +674,7 @@ if __name__ == "__main__":
             log(f"No cases match --sizes {args.sizes}", "ERROR")
             sys.exit(1)
 
-    bins = make_timing_bins(par_threads)
+    bins = make_timing_bins(par_threads, include_par=not args.no_par)
 
     log("=" * 64)
     log("MST Benchmark  ─  ξ_μ (shrinkage)  +  t̂ (normalised throughput)")
