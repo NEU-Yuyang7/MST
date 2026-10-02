@@ -1,0 +1,97 @@
+Raw evidence log backing BMSBoruvka_Benchmark_Findings.docx
+=============================================================
+
+All commands run against github.com/NEU-Yuyang7/MST (zip uploaded to chat),
+compiled with: g++ -O2 -std=c++17, on an x86_64 Linux sandbox.
+
+-------------------------------------------------------------
+1. git history check: nth_element never appears in any commit
+-------------------------------------------------------------
+$ git log --oneline --all -- src/BMSBoruvka.cpp
+  (and every ancestor path/commit, including the very first "WIP: initial
+  implementation of BMS-Boruvka MST" and "WIP: 5th version" commits)
+
+$ for commit in 2ace975 259a479 a4ca74e 6b6aa99 d68f941 HEAD; do
+    git show $commit:BMSBoruvka.cpp 2>/dev/null | grep -c nth_element
+    git show $commit:src/BMSBoruvka.cpp 2>/dev/null | grep -c nth_element
+  done
+-> 0 for every single commit, both possible paths.
+
+-------------------------------------------------------------
+2. Instrumented countingSortEdges: confirms std::sort fallback
+   for the paper's own default benchmark weight range [1, 1e9]
+-------------------------------------------------------------
+$ ./gen 100000 500000 --seed 42 > g100k.txt
+$ ./gen 1000000 5000000 --seed 42 > g1m.txt
+$ ./gen 1000000 5000000 --seed 42 --weights small > g1m_small.txt
+
+$ ./BMSBoruvka_instrumented < g100k.txt > /dev/null
+[countingSortEdges] FALLBACK to std::sort: range=999997315 > MAX_BUCKETS=50000000 (m=500000)
+
+$ ./BMSBoruvka_instrumented < g1m.txt > /dev/null
+[countingSortEdges] FALLBACK to std::sort: range=999998923 > MAX_BUCKETS=50000000 (m=5000000)
+
+$ ./BMSBoruvka_instrumented < g1m_small.txt > /dev/null
+[countingSortEdges] using COUNTING SORT: range=100 (m=5000000)
+
+-------------------------------------------------------------
+3. Constructor (sort) vs run() (Phase A/B/C) timing split
+-------------------------------------------------------------
+n=100,000:  constructor=48.985 ms   run()=33.587 ms   total=82.572 ms   ctor-fraction=59.3%
+n=1,000,000 (default weights): constructor=583.351 ms   run()=507.225 ms   total=1090.576 ms   ctor-fraction=53.5%
+n=1,000,000 (small weights, true counting-sort path): constructor=923.560 ms run()=456.622 ms total=1380.181 ms ctor-fraction=66.9%
+  (note: the "fast path" is not actually fast here either, due to the
+   per-equal-weight-segment tie-break sort when many edges share a weight)
+
+-------------------------------------------------------------
+4. Real benchmark harness run (python3 run_bench.py --build --gen
+   --sizes 10k,100k --target-sec 8 --no-par), correctness verified
+   ("All algorithms agree" on MST weight)
+-------------------------------------------------------------
+10k  (n=10,000  m=50,000),  50 trials:
+  boruvka         38.9 ms  sigma=1.6
+  kruskal         12.5 ms  sigma=0.9
+  filter_kruskal  11.3 ms  sigma=0.7
+  bms             15.5 ms  sigma=1.8
+
+100k (n=100,000 m=500,000), 4 trials:
+  boruvka        419.9 ms  sigma=10.9
+  kruskal        130.6 ms  sigma=4.1
+  filter_kruskal 106.8 ms  sigma=2.4
+  bms            164.0 ms  sigma=2.9
+
+Full CSV: bench_timing.csv (included alongside this file)
+
+-------------------------------------------------------------
+5. Radix-sort patch (BMSBoruvka_radix.cpp): correctness + timing
+-------------------------------------------------------------
+Correctness (MST total weight, identical to original bms and filter_kruskal):
+  n=100,000: 12103576215699  (all three agree)
+  n=1,000,000: 120197500686618  (all three agree)
+
+Timing (manual loop, `date +%s.%N` wall clock, 5-7 trials, mean):
+n=100,000 (m=500,000):
+  boruvka          423.6 ms
+  kruskal          129.4 ms
+  filter_kruskal   111.0 ms
+  bms (original)   165.3 ms
+  bms (radix)      143.4 ms
+
+n=1,000,000 (m=5,000,000):
+  boruvka         4949.9 ms
+  kruskal         1466.4 ms
+  filter_kruskal  1262.0 ms
+  bms (original)  1956.4 ms
+  bms (radix)     1619.6 ms
+
+-------------------------------------------------------------
+6. t=1 ablation (BMSBoruvka_t1.cpp = radix patch + computeT()
+   forced to return 1), correctness + timing
+-------------------------------------------------------------
+Correctness: bms_t1 MST weight identical to filter_kruskal at both sizes.
+
+n=100,000: bms (chosen t, radix)=155.4 ms   bms (t=1)=141.2 ms   filter_kruskal=109.5 ms
+n=1,000,000: bms (chosen t, radix)=1691.5 ms   bms (t=1)=1649.3 ms   filter_kruskal=1222.6 ms
+
+t=1 is faster than the paper's chosen t at both sizes tested, contrary to the
+amortization argument in the earlier review memo (Draft B).
