@@ -12,18 +12,21 @@ should match the .docx closely:
 
 ## Compiling
 
-**Use XeLaTeX (or LuaLaTeX), not pdflatex:**
+**Use XeLaTeX (or LuaLaTeX), not pdflatex.** The source uses Unicode
+characters directly (Borůvka's "ů", ξ, θ, and some math glyphs) rather than
+LaTeX escape sequences, so it relies on fontspec + a system Unicode font
+(DejaVu Serif/Math, set in the preamble) rather than pdfTeX's 8-bit font
+model. Both xelatex and lualatex are on essentially every modern TeX
+distribution, so this shouldn't require installing anything extra.
 
-    xelatex BMSBoruvka.tex   (run twice for cross-references)
-
-The source uses Unicode characters directly (Borůvka's "ů", ξ, θ, and some
-math glyphs) rather than LaTeX escape sequences, so it relies on fontspec +
-a system Unicode font (DejaVu Serif/Math, set in the preamble) rather than
-pdfTeX's 8-bit font model. Both xelatex and lualatex are on essentially
-every modern TeX distribution (TeX Live, MiKTeX, Overleaf all default to
-offering these engines), so this shouldn't require installing anything
-extra, but if you paste this into Overleaf, double-check the project's
-compiler setting (menu: Compiler) is set to XeLaTeX before building.
+- **Command line:** `xelatex BMSBoruvka.tex` (run twice for cross-references)
+- **TeXShop (macOS):** the file's first line is `% !TEX program = xelatex`,
+  which TeXShop (and TeXworks) auto-detects, so just open the file and hit
+  Typeset -- it'll use XeTeX automatically, no menu change needed. If for
+  any reason it doesn't pick it up, use the engine dropdown at the top of
+  the TeXShop window and select "XeTeX" instead of the default "pdfTeX",
+  then Typeset again.
+- **Overleaf:** Menu -> Compiler -> XeLaTeX, then recompile.
 
 The enclosed BMSBoruvka.pdf is the actual compiled output (verified: clean
 compile, no errors, 17 pages), so you can confirm visually that nothing
