@@ -119,3 +119,7 @@ project/
 |
 |-- README.md
 ```
+
+## Paper
+
+The `paper` directory now holds the files for building the paper, as well as the original `.docx` version.
