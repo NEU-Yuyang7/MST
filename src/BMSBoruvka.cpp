@@ -1,17 +1,24 @@
 /*
- * BMSBoruvka.cpp
+ * BMSBoruvka.cpp  (v7)
  *
  * ── Complexity Summary (Sparse Graph Case: m = O(n)) ───────────────
  *
  *   Parameters:
  *       t = ⌈log^{2/3}(n)⌉
  *       P = ⌈log(n) / t⌉ = O(log^{1/3}(n))
+ *       k = ⌊m / P⌋  edges activated per super-step
+ *
+ *   Phase A (activation, default mode "select"):
+ *       One std::nth_element call per super-step on the unactivated
+ *       suffix of the edge array (no global sort).
+ *       Σ_{i=0}^{P-2} (m - i·k) = O(m · P) = O(m · log^{1/3}(n))
  *
  *   Component shrinkage:
  *       C_0 = n
  *       C_{i+1} ≤ C_i / 2^t
  *       (Each super-step performs t Borůvka rounds,
- *        and each round at least halves the number of components.)
+ *        and each round at least halves the number of components
+ *        that have an activated outgoing edge.)
  *
  *   Sparse graph assumption:
  *       m_i ≤ C_i
@@ -36,6 +43,29 @@
  *
  *   Overall complexity:
  *       O(n · log^{2/3}(n))
+ *
+ * ── Changes in v7 ───────────────────────────────────────────────────
+ *
+ *   1. Phase A uses per-super-step std::nth_element (as described in
+ *      the paper, Lemma 2) instead of a global sort in the constructor.
+ *   2. Optional "--phase-a=radix" mode: one upfront O(m) LSD radix sort
+ *      (replaces the old countingSortEdges, which silently fell back to
+ *      std::sort when the weight range exceeded 5·10^7).
+ *   3. boruvkaRound reuses its compBest buffer and resets only the
+ *      entries it touched, instead of allocating O(N) every round.
+ *      Every component's cheapest edge is now tried (previously a
+ *      component merged earlier in the same loop was skipped).
+ *   4. "--t=N" overrides the number of Borůvka rounds per super-step
+ *      (e.g. --t=1 for the ablation).
+ *   5. Correctness fix: if components remain after P super-steps (the
+ *      early, partially-activated super-steps may shrink less than 2^t),
+ *      extra super-steps with all edges activated run until no
+ *      inter-component edge is left. Previously the result could be an
+ *      incomplete spanning tree on a connected graph.
+ *   6. Compiling with -DBMS_XI emits the ξ trace (JSON lines on stderr);
+ *      bms_instrumented.cpp is now this same file with BMS_XI defined.
+ *
+ * Usage:  ./bms [--phase-a=select|radix] [--t=N] < graph.txt
  */
 
 #include <bits/stdc++.h>
@@ -60,86 +90,64 @@ static inline bool edgeLess(const CompEdge& A, const CompEdge& B) {
     return A.orig_eidx < B.orig_eidx;
 }
 
+// Order used by Phase A selection: weight, then (min(u,v), max(u,v)).
+static inline bool origEdgeLess(const Edge& a, const Edge& b) {
+    if (a.w != b.w) return a.w < b.w;
+    int au = min(a.u, a.v), av = max(a.u, a.v);
+    int bu = min(b.u, b.v), bv = max(b.u, b.v);
+    if (au != bu) return au < bu;
+    return av < bv;
+}
+
 
 // ════════════════════════════════════════════════════════════════
-// Integer Counting Sort
-// Precondition: Edge weights are integers (long long) and
-//               the range R = maxW - minW + 1 is reasonably bounded.
-// Time Complexity: O(m + R).
-// If R exceeds a predefined threshold, the implementation
-// falls back to std::sort to avoid excessive memory usage.
+// LSD Radix Sort by weight (only used with --phase-a=radix)
+// 4 passes of 16-bit digits over the 64-bit biased weight.
+// Time Complexity: O(m), independent of the weight range.
+// Stable; ties keep their input order. MST weight does not depend
+// on how weight ties are broken.
 // ════════════════════════════════════════════════════════════════
-static void countingSortEdges(std::vector<Edge>& edges) {
-    if (edges.size() <= 1) return;
+static void radixSortEdges(vector<Edge>& edges) {
+    const size_t n = edges.size();
+    if (n <= 1) return;
 
-    long long minW = edges[0].w, maxW = edges[0].w;
-    for (const auto& e : edges) {
-        if (e.w < minW) minW = e.w;
-        if (e.w > maxW) maxW = e.w;
+    // Bias to unsigned so ordering is preserved for negative weights too.
+    vector<unsigned long long> key(n);
+    for (size_t i = 0; i < n; i++) {
+        key[i] = (unsigned long long)edges[i].w ^ 0x8000000000000000ULL;
     }
 
-    // Compute number of buckets (careful about overflow)
-    unsigned long long rangeULL = (unsigned long long)(maxW - minW) + 1ULL;
+    vector<Edge> buf(n);
+    vector<unsigned long long> keyBuf(n);
+    constexpr int PASSES = 4;
+    constexpr int BITS = 16;
+    constexpr unsigned RADIX = 1u << BITS;
 
-    // Bucket threshold: 50,000,000 buckets
-    // ≈ 200MB memory usage for int counters (excluding output buffer).
-    // This value may be tuned according to available system memory.
-    constexpr unsigned long long MAX_BUCKETS = 50000000ULL;
+    vector<int> cnt(RADIX + 1);
 
-    auto tieLess = [](const Edge& a, const Edge& b) {
-        if (a.w != b.w) return a.w < b.w;
-        int au = std::min(a.u, a.v), av = std::max(a.u, a.v);
-        int bu = std::min(b.u, b.v), bv = std::max(b.u, b.v);
-        if (au != bu) return au < bu;
-        return av < bv;
-    };
+    vector<Edge>* src = &edges;
+    vector<Edge>* dst = &buf;
+    vector<unsigned long long>* ksrc = &key;
+    vector<unsigned long long>* kdst = &keyBuf;
 
-    if (rangeULL > MAX_BUCKETS) {
-        // Fallback to std::sort to prevent out-of-memory (OOM) issues.
-        std::sort(edges.begin(), edges.end(), tieLess);
-        return;
-    }
-
-    const size_t R = (size_t)rangeULL;
-    std::vector<int> cnt(R, 0);
-
-    // Counting
-    for (const auto& e : edges) {
-        size_t idx = (size_t)(e.w - minW);
-        ++cnt[idx];
-    }
-
-    // Prefix sum
-    for (size_t i = 1; i < R; ++i) cnt[i] += cnt[i - 1];
-
-    // Stable output construction (traverse from right to left)
-    std::vector<Edge> out(edges.size());
-    for (int i = (int)edges.size() - 1; i >= 0; --i) {
-        const auto& e = edges[(size_t)i];
-        size_t idx = (size_t)(e.w - minW);
-        out[(size_t)(--cnt[idx])] = e;
-    }
-
-    // For each segment with identical weight w, apply tie-break sorting
-    // to preserve full consistency with the original comparator.
-    // Counting sort guarantees ordering by weight only;
-    // the original implementation additionally orders by
-    // (min(u,v), max(u,v)) as a tie-break rule.
-    //
-    // We therefore sort each equal-weight segment locally.
-    // Total cost: Σ k_w log k_w.
-    // If many edges share the same weight, this introduces extra overhead.
-    size_t start = 0;
-    while (start < out.size()) {
-        size_t end = start + 1;
-        while (end < out.size() && out[end].w == out[start].w) ++end;
-        if (end - start > 1) {
-            std::sort(out.begin() + (ptrdiff_t)start, out.begin() + (ptrdiff_t)end, tieLess);
+    for (int pass = 0; pass < PASSES; pass++) {
+        unsigned shift = pass * BITS;
+        fill(cnt.begin(), cnt.end(), 0);
+        for (size_t i = 0; i < n; i++) {
+            unsigned digit = (unsigned)(((*ksrc)[i] >> shift) & (RADIX - 1));
+            cnt[digit + 1]++;
         }
-        start = end;
+        for (unsigned d = 0; d < RADIX; d++) cnt[d + 1] += cnt[d];
+        for (size_t i = 0; i < n; i++) {
+            unsigned digit = (unsigned)(((*ksrc)[i] >> shift) & (RADIX - 1));
+            int pos = cnt[digit]++;
+            (*dst)[(size_t)pos] = (*src)[i];
+            (*kdst)[(size_t)pos] = (*ksrc)[i];
+        }
+        swap(src, dst);
+        swap(ksrc, kdst);
     }
-
-    edges.swap(out);
+    // PASSES is even, so src now points back to `edges` already in sorted order.
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -253,32 +261,44 @@ struct GraphCompressor {
 // ════════════════════════════════════════════════════════════════
 // One Borůvka round within a super-step
 // Does not require sorted input; performs a full edge scan
-// Time complexity: O(|edges| + C_i)
+// Time complexity: O(|edges|)
+//
+// compBest is kept across rounds (grow-only) and only the entries
+// touched in this round are reset, so no O(N) allocation per round.
 // ════════════════════════════════════════════════════════════════
+struct BoruvkaWorkspace {
+    vector<int> compBest;   // root → index of its cheapest edge, -1 if none
+    vector<int> touched;    // roots written during this round (for reset)
+};
+
 static vector<CompEdge> boruvkaRound(
     const vector<CompEdge>& edges,
-    DSU& uf)
+    DSU& uf,
+    BoruvkaWorkspace& ws)
 {
     const int N = (int)uf.p.size();
-    vector<int> compBest(N, -1);
+    if ((int)ws.compBest.size() < N) ws.compBest.resize(N, -1);
+    vector<int>& compBest = ws.compBest;
+    ws.touched.clear();
 
     for (int i = 0; i < (int)edges.size(); i++) {
         const auto& e = edges[i];
         int ca = uf.find(e.u), cb = uf.find(e.v);
         if (ca == cb) continue;
-        if (compBest[ca] < 0 || edgeLess(e, edges[compBest[ca]])) compBest[ca] = i;
-        if (compBest[cb] < 0 || edgeLess(e, edges[compBest[cb]])) compBest[cb] = i;
+        if (compBest[ca] < 0) { ws.touched.push_back(ca); compBest[ca] = i; }
+        else if (edgeLess(e, edges[compBest[ca]])) compBest[ca] = i;
+        if (compBest[cb] < 0) { ws.touched.push_back(cb); compBest[cb] = i; }
+        else if (edgeLess(e, edges[compBest[cb]])) compBest[cb] = i;
     }
 
+    // Try the cheapest edge of every component that had one at scan time.
+    // All of them are safe (cut property under the consistent edgeLess order),
+    // and uf.unite rejects the ones that would close a cycle.
     vector<CompEdge> selected;
-    for (int c = 0; c < N; c++) {
-        if (uf.find(c) != c) continue;
-        const int bi = compBest[c];
-        if (bi < 0) continue;
-        const auto& e = edges[bi];
-        int ra = uf.find(e.u), rb = uf.find(e.v);
-        if (ra == rb) continue;
-        auto [nr, dr] = uf.unite(ra, rb);
+    for (int c : ws.touched) {
+        const auto& e = edges[compBest[c]];
+        compBest[c] = -1;
+        auto [nr, dr] = uf.unite(e.u, e.v);
         if (nr != -1) selected.push_back(e);
     }
     return selected;
@@ -297,12 +317,15 @@ static int computeP(int n, int t) {
     return max(1, (int)ceil(log2((double)n) / t));
 }
 
+enum class PhaseAMode { Select, Radix };
+
 // ════════════════════════════════════════════════════════════════
 // BMSBoruvka
 // ════════════════════════════════════════════════════════════════
 struct BMSBoruvka {
     int n_orig;
     vector<Edge> edges;
+    PhaseAMode phaseA;
 
     long long mst_weight = 0;
     vector<int> mst_eidx;
@@ -310,22 +333,30 @@ struct BMSBoruvka {
     int t_rounds;
     int P_steps;
 
-    explicit BMSBoruvka(int n_, vector<Edge> E)
-        : n_orig(n_), edges(std::move(E))
+#ifdef BMS_XI
+    vector<double> xi_per_step;
+    vector<int> C_trace;   // component count at start of each super-step
+    vector<int> M_trace;   // curEdges size entering Phase B each super-step
+#endif
+
+    explicit BMSBoruvka(int n_, vector<Edge> E,
+                        PhaseAMode mode = PhaseAMode::Select, int t_override = 0)
+        : n_orig(n_), edges(std::move(E)), phaseA(mode)
     {
-        countingSortEdges(edges);
-        t_rounds = computeT(n_orig);
+        t_rounds = t_override > 0 ? t_override : computeT(n_orig);
         P_steps  = computeP(n_orig, t_rounds);
     }
 
     void run() {
         mst_weight = 0;
         mst_eidx.clear();
-        mst_eidx.reserve(n_orig - 1);
+        mst_eidx.reserve(max(0, n_orig - 1));
 
         if (n_orig <= 1 || edges.empty()) return;
 
         const int m = (int)edges.size();
+
+        if (phaseA == PhaseAMode::Radix) radixSortEdges(edges);
 
         DSU uf;
         uf.init(n_orig);
@@ -340,14 +371,32 @@ struct BMSBoruvka {
         iota(origToComp.begin(), origToComp.end(), 0);
 
         GraphCompressor compressor;
+        BoruvkaWorkspace ws;
 
-        for (int step = 0; step < P_steps && uf.comps > 1; step++) {
+        // Super-steps 0 … P-1 as in the paper; the last one activates all
+        // remaining edges. If components with outgoing edges remain after
+        // that, further super-steps run (all edges already active) until
+        // curEdges is empty.
+        for (int step = 0; uf.comps > 1; step++) {
+#ifdef BMS_XI
+            const int C_before = uf.comps;
+            C_trace.push_back(C_before);
+#endif
 
-            // Phase A: Activate edges in nondecreasing weight order
-            // (prefix-based activation to preserve the cut property)
-            const int activateEnd = (step == P_steps - 1)
+            // Phase A: Activate the next k lightest edges
+            // (weight-prefix activation preserves the cut property)
+            const int activateEnd = (step >= P_steps - 1)
                 ? m
                 : min(m, curActivated + edgesPerStep);
+
+            if (phaseA == PhaseAMode::Select && activateEnd < m && activateEnd > curActivated) {
+                // After this call edges[curActivated, activateEnd) are the
+                // (activateEnd - curActivated) lightest unactivated edges,
+                // and no edge in [activateEnd, m) is lighter than any of them.
+                nth_element(edges.begin() + curActivated,
+                            edges.begin() + activateEnd,
+                            edges.end(), origEdgeLess);
+            }
 
             for (int i = curActivated; i < activateEnd; i++) {
                 const auto& e = edges[i];
@@ -360,7 +409,17 @@ struct BMSBoruvka {
             }
             curActivated = activateEnd;
 
-            if (curEdges.empty()) continue;
+#ifdef BMS_XI
+            M_trace.push_back((int)curEdges.size());
+#endif
+
+            if (curEdges.empty()) {
+#ifdef BMS_XI
+                xi_per_step.push_back(1.0);
+#endif
+                if (curActivated == m) break;   // nothing left to merge (MSF)
+                continue;
+            }
 
             // Phase B: Execute t Borůvka rounds
             // Each round runs in O(m_i) time
@@ -377,14 +436,18 @@ struct BMSBoruvka {
                 }
                 if (curEdges.empty()) break;
 
-                vector<CompEdge> selected = boruvkaRound(curEdges, uf);
+                vector<CompEdge> selected = boruvkaRound(curEdges, uf, ws);
                 for (const auto& e : selected) {
                     mst_eidx.push_back(e.orig_eidx);
                     mst_weight += e.w;
                 }
 
-                if ((int)mst_eidx.size() == n_orig - 1) goto done;
+                if ((int)mst_eidx.size() == n_orig - 1) break;
             }
+
+#ifdef BMS_XI
+            xi_per_step.push_back((double)C_before / max(1, uf.comps));
+#endif
 
             if (uf.comps <= 1) break;
             if ((int)mst_eidx.size() == n_orig - 1) break;
@@ -403,6 +466,7 @@ struct BMSBoruvka {
                 }
 
                 if (curEdges.empty()) {
+                    if (curActivated == m) break;   // nothing left to merge (MSF)
                     continue;
                 }
 
@@ -430,8 +494,6 @@ struct BMSBoruvka {
             }
         }
 
-        done:;
-
         mst_weight = 0;
         for (int eidx : mst_eidx) mst_weight += edges[eidx].w;
     }
@@ -440,9 +502,22 @@ struct BMSBoruvka {
 // ════════════════════════════════════════════════════════════════
 // main
 // ════════════════════════════════════════════════════════════════
-int main() {
+int main(int argc, char** argv) {
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
+
+    PhaseAMode mode = PhaseAMode::Select;
+    int t_override = 0;
+    for (int i = 1; i < argc; i++) {
+        string a = argv[i];
+        if (a == "--phase-a=select")      mode = PhaseAMode::Select;
+        else if (a == "--phase-a=radix")  mode = PhaseAMode::Radix;
+        else if (a.rfind("--t=", 0) == 0) t_override = max(1, atoi(a.c_str() + 4));
+        else {
+            cerr << "Usage: " << argv[0] << " [--phase-a=select|radix] [--t=N] < graph\n";
+            return 1;
+        }
+    }
 
     int n, m;
     cin >> n >> m;
@@ -455,8 +530,30 @@ int main() {
         E.push_back({u, v, w});
     }
 
-    BMSBoruvka solver(n, std::move(E));
+    BMSBoruvka solver(n, std::move(E), mode, t_override);
     solver.run();
+
+#ifdef BMS_XI
+    // ξ trace on stderr (JSON lines), same format as the old bms_instrumented.cpp
+    for (size_t i = 0; i < solver.xi_per_step.size(); i++) {
+        fprintf(stderr, "{\"type\":\"step\",\"step\":%d,\"C_before\":%d,\"M_i\":%d,"
+                "\"t\":%d,\"xi\":%.4f}\n", (int)i, solver.C_trace[i],
+                solver.M_trace[i], solver.t_rounds, solver.xi_per_step[i]);
+    }
+    double log_sum = 0; int cnt = 0;
+    for (double x : solver.xi_per_step) if (x > 1.0) { log_sum += log(x); cnt++; }
+    double xi_geomean = cnt > 0 ? exp(log_sum / cnt) : 1.0;
+    fprintf(stderr, "{\"type\":\"summary\",\"n\":%d,\"m\":%d,\"P\":%d,\"t\":%d,"
+            "\"steps_actual\":%d,\"xi_geomean\":%.4f,\"xi_theory\":%.4f,\"C_trace\":[",
+            n, m, solver.P_steps, solver.t_rounds, (int)solver.xi_per_step.size(),
+            xi_geomean, pow(2.0, solver.t_rounds));
+    for (size_t i = 0; i < solver.C_trace.size(); i++)
+        fprintf(stderr, "%s%d", i ? "," : "", solver.C_trace[i]);
+    fprintf(stderr, "],\"M_trace\":[");
+    for (size_t i = 0; i < solver.M_trace.size(); i++)
+        fprintf(stderr, "%s%d", i ? "," : "", solver.M_trace[i]);
+    fprintf(stderr, "]}\n");
+#endif
 
     cout << "Total weight = " << solver.mst_weight << "\n";
     cout << "MST/MSF edges (" << solver.mst_eidx.size() << "):\n";
