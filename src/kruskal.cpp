@@ -11,6 +11,7 @@
  *                  u v w  ...
  */
 #include <bits/stdc++.h>
+#include "bench_harness.h"
 using namespace std;
 using LL = long long;
 
@@ -33,36 +34,51 @@ struct DSU {
     }
 };
 
-int main() {
-    ios::sync_with_stdio(false); cin.tie(nullptr);
+int main(int argc, char** argv) {
+    bench::init(argc, argv);
     int n, m; cin >> n >> m;
     vector<Edge> E(m);
     for (auto& e : E) cin >> e.u >> e.v >> e.w;
 
-    // Sort by weight; break ties deterministically
-    sort(E.begin(), E.end(), [](const Edge& a, const Edge& b) {
-        if (a.w != b.w) return a.w < b.w;
-        int au = min(a.u,a.v), av = max(a.u,a.v);
-        int bu = min(b.u,b.v), bv = max(b.u,b.v);
-        return au != bu ? au < bu : av < bv;
-    });
-
-    DSU dsu(n);
     LL total = 0;
     vector<Edge> mst;
-    mst.reserve(n - 1);
 
-    for (const auto& e : E) {
-        if (dsu.unite(e.u, e.v)) {
-            mst.push_back(e);
-            total += e.w;
-            if ((int)mst.size() == n - 1) break;
+    for (int r = 0; r < bench::repeats(); r++) {
+        // The sort is in place, so each repeat needs the unsorted edge list
+        // back. The copy is outside the timed region.
+        vector<Edge> work = E;
+
+        double t0 = bench::now_ms();
+
+        // Sort by weight; break ties deterministically
+        sort(work.begin(), work.end(), [](const Edge& a, const Edge& b) {
+            if (a.w != b.w) return a.w < b.w;
+            int au = min(a.u,a.v), av = max(a.u,a.v);
+            int bu = min(b.u,b.v), bv = max(b.u,b.v);
+            return au != bu ? au < bu : av < bv;
+        });
+
+        DSU dsu(n);
+        total = 0;
+        mst.clear();
+        mst.reserve(n - 1);
+
+        for (const auto& e : work) {
+            if (dsu.unite(e.u, e.v)) {
+                mst.push_back(e);
+                total += e.w;
+                if ((int)mst.size() == n - 1) break;
+            }
         }
+
+        bench::report_time(bench::now_ms() - t0);
     }
 
     cout << "Total weight = " << total << "\n";
-    cout << "Edges in MST/MSF (" << mst.size() << "):\n";
-    for (const auto& e : mst)
-        cout << e.u << " " << e.v << " " << e.w << "\n";
+    if (bench::print_edges()) {
+        cout << "Edges in MST/MSF (" << mst.size() << "):\n";
+        for (const auto& e : mst)
+            cout << e.u << " " << e.v << " " << e.w << "\n";
+    }
     return 0;
 }

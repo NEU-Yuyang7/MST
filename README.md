@@ -88,13 +88,46 @@ python3 run_bench.py --sizes roadnet_ca
 
 ---
 
+---
+
+## How timing works
+
+Each binary times its own MST computation with `std::chrono::steady_clock` —
+after parsing the input, before printing the result — and reports it on stderr
+as `{"type":"timing","ms":...}`. `run_bench.py` reads that number. **Reported
+times are MST construction only**; reading the graph file and writing the MST
+out are not included.
+
+The shared support lives in `src/bench_harness.h` and gives every timing binary
+two flags:
+
+| Flag | Effect |
+| --- | --- |
+| `--quiet` | Print `Total weight = ...` but skip the per-edge MST dump. |
+| `--repeat K` | Run the MST computation K times on one parse, reporting each timing separately. The first is a warm-up and is discarded by the driver. |
+
+`run_bench.py` passes both automatically. `--repeat` exists because parsing the
+1m graph costs ~17.5 s against an algorithm time of ~0.7 s, so paying the parse
+per trial limited that case to 3 trials; amortising it over in-process repeats
+lifted the 100k case from 4 trials to 60.
+
+This replaced an earlier harness that timed whole processes, which meant ~92–99%
+of every measurement was text I/O. See `cluster/FINDINGS-io.md` — the published
+results in `analysis/` predate the fix and need regenerating.
+
+Note the trial count is `floor((target_sec/k − parse) / algo)`, so
+`--target-sec` has to exceed the parse cost to buy any trials at all. Use
+`--target-sec 300` or more for the 1m sizes.
+
+---
+
 ## Output Files
 
 All written to `--output-dir` (default `./results/`):
 
 | File               | Contents                                                     |
 | ------------------ | ------------------------------------------------------------ |
-| `bench_timing.csv` | Per-(size, algorithm): mean\_ms, min, max, σ, t̂, vs\_boruvka ratio, vs\_bms ratio |
+| `bench_timing.csv` | Per-(size, algorithm): mean\_ms (MST construction only), min, max, σ, parse\_ms, wall\_total\_ms, t̂, vs\_boruvka ratio, vs\_bms ratio |
 | `bench_xi.csv`     | Per-(size, algorithm, repeat): ξ\_μ, ξ\_theory, steps/rounds, per-step ξ sequence |
 | `bench_report.md`  | Human-readable Markdown report with ξ table, timing table, and convergence analysis |
 
@@ -103,6 +136,7 @@ All written to `--output-dir` (default `./results/`):
 ```
 project/
 |-- src/
+|   |-- bench_harness.h          # Shared timing support (--quiet, --repeat)
 |   |-- BMSBoruvka.cpp           # BMSBoruvka
 |   |-- bms_instrumented.cpp     # BMS + ξ collection
 |   |-- boruvka.cpp              # Borůvka
@@ -116,6 +150,11 @@ project/
 |
 |-- BMSSP/
 |   |-- BMSSP.cpp                # reproduce BMSSP(learning purposes)
+|
+|-- cluster/
+|   |-- run_bench.sbatch         # Slurm job script
+|   |-- README.md                # Running the benchmarks on a cluster
+|   |-- FINDINGS-io.md           # Why the published timings need regenerating
 |
 |-- README.md
 ```

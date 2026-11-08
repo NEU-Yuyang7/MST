@@ -69,6 +69,7 @@
  */
 
 #include <bits/stdc++.h>
+#include "bench_harness.h"
 using namespace std;
 
 // ════════════════════════════════════════════════════════════════
@@ -503,8 +504,8 @@ struct BMSBoruvka {
 // main
 // ════════════════════════════════════════════════════════════════
 int main(int argc, char** argv) {
-    ios::sync_with_stdio(false);
-    cin.tie(nullptr);
+    // Also sets up fast I/O and parses --quiet / --repeat.
+    bench::init(argc, argv);
 
     PhaseAMode mode = PhaseAMode::Select;
     int t_override = 0;
@@ -513,8 +514,13 @@ int main(int argc, char** argv) {
         if (a == "--phase-a=select")      mode = PhaseAMode::Select;
         else if (a == "--phase-a=radix")  mode = PhaseAMode::Radix;
         else if (a.rfind("--t=", 0) == 0) t_override = max(1, atoi(a.c_str() + 4));
+        // Consumed by bench::init above; skipped here so the usage check below
+        // doesn't reject them.
+        else if (a == "--quiet")          continue;
+        else if (a == "--repeat")         { i++; continue; }
         else {
-            cerr << "Usage: " << argv[0] << " [--phase-a=select|radix] [--t=N] < graph\n";
+            cerr << "Usage: " << argv[0]
+                 << " [--phase-a=select|radix] [--t=N] [--quiet] [--repeat K] < graph\n";
             return 1;
         }
     }
@@ -530,36 +536,50 @@ int main(int argc, char** argv) {
         E.push_back({u, v, w});
     }
 
-    BMSBoruvka solver(n, std::move(E), mode, t_override);
-    solver.run();
+    // The solver takes ownership of the edge vector and mutates it, so each
+    // repeat gets a fresh copy (made outside the timed region). The constructor
+    // is inside the timed region: it does the initial setup, which is part of
+    // the algorithm's cost.
+    std::unique_ptr<BMSBoruvka> solver;
+    for (int r = 0; r < bench::repeats(); r++) {
+        vector<Edge> work = E;
+        double t0 = bench::now_ms();
+        solver = std::make_unique<BMSBoruvka>(n, std::move(work), mode, t_override);
+        solver->run();
+        bench::report_time(bench::now_ms() - t0);
+    }
 
 #ifdef BMS_XI
-    // ξ trace on stderr (JSON lines), same format as the old bms_instrumented.cpp
-    for (size_t i = 0; i < solver.xi_per_step.size(); i++) {
+    // ξ trace on stderr (JSON lines), same format as the old bms_instrumented.cpp.
+    // Emitted once, for the final repeat: the trace is deterministic given the
+    // input, so repeats would only duplicate it.
+    for (size_t i = 0; i < solver->xi_per_step.size(); i++) {
         fprintf(stderr, "{\"type\":\"step\",\"step\":%d,\"C_before\":%d,\"M_i\":%d,"
-                "\"t\":%d,\"xi\":%.4f}\n", (int)i, solver.C_trace[i],
-                solver.M_trace[i], solver.t_rounds, solver.xi_per_step[i]);
+                "\"t\":%d,\"xi\":%.4f}\n", (int)i, solver->C_trace[i],
+                solver->M_trace[i], solver->t_rounds, solver->xi_per_step[i]);
     }
     double log_sum = 0; int cnt = 0;
-    for (double x : solver.xi_per_step) if (x > 1.0) { log_sum += log(x); cnt++; }
+    for (double x : solver->xi_per_step) if (x > 1.0) { log_sum += log(x); cnt++; }
     double xi_geomean = cnt > 0 ? exp(log_sum / cnt) : 1.0;
     fprintf(stderr, "{\"type\":\"summary\",\"n\":%d,\"m\":%d,\"P\":%d,\"t\":%d,"
             "\"steps_actual\":%d,\"xi_geomean\":%.4f,\"xi_theory\":%.4f,\"C_trace\":[",
-            n, m, solver.P_steps, solver.t_rounds, (int)solver.xi_per_step.size(),
-            xi_geomean, pow(2.0, solver.t_rounds));
-    for (size_t i = 0; i < solver.C_trace.size(); i++)
-        fprintf(stderr, "%s%d", i ? "," : "", solver.C_trace[i]);
+            n, m, solver->P_steps, solver->t_rounds, (int)solver->xi_per_step.size(),
+            xi_geomean, pow(2.0, solver->t_rounds));
+    for (size_t i = 0; i < solver->C_trace.size(); i++)
+        fprintf(stderr, "%s%d", i ? "," : "", solver->C_trace[i]);
     fprintf(stderr, "],\"M_trace\":[");
-    for (size_t i = 0; i < solver.M_trace.size(); i++)
-        fprintf(stderr, "%s%d", i ? "," : "", solver.M_trace[i]);
+    for (size_t i = 0; i < solver->M_trace.size(); i++)
+        fprintf(stderr, "%s%d", i ? "," : "", solver->M_trace[i]);
     fprintf(stderr, "]}\n");
 #endif
 
-    cout << "Total weight = " << solver.mst_weight << "\n";
-    cout << "MST/MSF edges (" << solver.mst_eidx.size() << "):\n";
-    for (int eidx : solver.mst_eidx) {
-        const auto& e = solver.edges[eidx];
-        cout << e.u << " " << e.v << " " << e.w << "\n";
+    cout << "Total weight = " << solver->mst_weight << "\n";
+    if (bench::print_edges()) {
+        cout << "MST/MSF edges (" << solver->mst_eidx.size() << "):\n";
+        for (int eidx : solver->mst_eidx) {
+            const auto& e = solver->edges[eidx];
+            cout << e.u << " " << e.v << " " << e.w << "\n";
+        }
     }
 
     return 0;

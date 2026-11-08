@@ -1,5 +1,6 @@
 #include <bits/stdc++.h>
 #include <omp.h>
+#include "bench_harness.h"
 using namespace std;
 
 using LL = long long;
@@ -133,7 +134,9 @@ pair<LL, vector<Edge>> boruvkaMST_parallel(int n, const vector<Edge>& edges) {
     return {total, mst};
 }
 
-int main() {
+int main(int argc, char** argv) {
+    bench::init(argc, argv);
+
     int n, m;
     cin >> n >> m;
 
@@ -148,12 +151,23 @@ int main() {
         edges.push_back({u, v, w});
     }
 
-    auto [total, mst] = boruvkaMST_parallel(n, edges);
+    // boruvkaMST_parallel takes edges by const reference, so repeats need no copy.
+    LL total = 0;
+    vector<Edge> mst;
+    for (int r = 0; r < bench::repeats(); r++) {
+        double t0 = bench::now_ms();
+        auto res = boruvkaMST_parallel(n, edges);
+        bench::report_time(bench::now_ms() - t0);
+        total = res.first;
+        mst   = std::move(res.second);
+    }
 
     cout << "Total weight = " << total << "\n";
-    cout << "Edges in MST/MSF (" << mst.size() << "):\n";
-    for (const auto& e : mst) {
-        cout << e.u << " " << e.v << " " << e.w << "\n";
+    if (bench::print_edges()) {
+        cout << "Edges in MST/MSF (" << mst.size() << "):\n";
+        for (const auto& e : mst) {
+            cout << e.u << " " << e.v << " " << e.w << "\n";
+        }
     }
 
     return 0;

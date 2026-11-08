@@ -15,6 +15,12 @@ Two core metrics:
   t̂ (t_hat) — normalised throughput
     t̂ = θ₀(n, m) / T_mean   [theoretical ops per millisecond]
 
+    T_mean is MST CONSTRUCTION TIME ONLY. Each binary times itself with
+    steady_clock after parsing the graph and before printing the MST, and
+    reports the result on stderr; this script reads that number. Timing whole
+    processes instead would measure text I/O — on the 1m case ~18 s of the
+    ~19 s total — which swamps every algorithmic difference.
+
     boruvka / par_T*:  θ₀ = m · log₂(n)              [O(m log n)]
     bms:               θ₀ = n · (log₂ n)^(2/3)        [O(n log^{2/3} n)]
 
@@ -115,17 +121,51 @@ def run_cmd(cmd, *, stdin=None, capture_out=False, capture_err=False,
     )
 
 
-def time_run(cmd, stdin, env=None):
-    """Run cmd with stdin redirected; return wall-clock ms."""
+def time_run(cmd, stdin, env=None, repeat=1):
+    """
+    Run cmd with stdin redirected. Returns (algo_ms_list, wall_ms).
+
+      algo_ms_list  the binary's own measurements of MST construction only,
+                    one per in-process repeat, taken with steady_clock after
+                    parsing and before printing and reported on stderr as
+                    {"type":"timing","ms":...}. Empty if the binary doesn't
+                    report any (e.g. an old build without bench_harness.h).
+
+      wall_ms       whole-process wall clock: spawn + parse + K× compute + print.
+
+    algo_ms is the metric. wall_ms is kept only for reference, because it is
+    dominated by text parsing — on the 1m case ~18 s of the ~19 s total is I/O,
+    which buries the differences between algorithms entirely.
+    """
     e = {**os.environ, **(env or {})}
+    full = list(cmd) + (["--repeat", str(repeat)] if repeat > 1 else [])
     with open(stdin) as fh:
         t0 = time.perf_counter()
-        subprocess.run(
-            cmd, stdin=fh,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        r = subprocess.run(
+            full, stdin=fh,
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             env=e, check=True,
         )
-        return (time.perf_counter() - t0) * 1000.0
+        wall_ms = (time.perf_counter() - t0) * 1000.0
+
+    algo = []
+    for line in r.stderr.decode(errors="replace").splitlines():
+        try:
+            obj = json.loads(line)
+            if obj.get("type") == "timing":
+                algo.append(float(obj["ms"]))
+        except Exception:
+            pass
+    return algo, wall_ms
+
+
+def primary_times(rec):
+    """
+    The series to report on: in-process algorithm times when the binaries
+    provide them, otherwise whole-process wall clock.
+    """
+    algo = [x for x in rec.get("algo", []) if x is not None]
+    return algo if algo else rec.get("wall", [])
 
 
 def get_weight(cmd, stdin, env=None):
@@ -225,17 +265,20 @@ def make_timing_bins(par_threads, include_par=True):
     par_T2, par_T4, … set OMP_NUM_THREADS accordingly.
     Set include_par=False to omit parallel Borůvka (e.g. on single-core machines).
     """
+    # --quiet suppresses the per-edge MST dump. The "Total weight = ..." line
+    # is still printed, so the correctness check is unaffected, but we no longer
+    # pay to format n-1 lines of text on every single trial.
     bins = [
-        ("boruvka",        [str(BIN_DIR / "boruvka")],        {}),
-        ("kruskal",        [str(BIN_DIR / "kruskal")],        {}),
-        ("filter_kruskal", [str(BIN_DIR / "filter_kruskal")], {}),
-        ("bms",            [str(BIN_DIR / "bms")],            {}),
+        ("boruvka",        [str(BIN_DIR / "boruvka"),        "--quiet"], {}),
+        ("kruskal",        [str(BIN_DIR / "kruskal"),        "--quiet"], {}),
+        ("filter_kruskal", [str(BIN_DIR / "filter_kruskal"), "--quiet"], {}),
+        ("bms",            [str(BIN_DIR / "bms"),            "--quiet"], {}),
     ]
     if include_par:
         for t in par_threads:
             bins.append((
                 f"par_T{t}",
-                [str(BIN_DIR / "parallel_boruvka")],
+                [str(BIN_DIR / "parallel_boruvka"), "--quiet"],
                 {"OMP_NUM_THREADS": str(t)},
             ))
     return bins
@@ -274,37 +317,49 @@ def probe_once(cases, bins):
         if not p.exists():
             continue
         for label, cmd, env in bins:
-            time_run(cmd, p, env)          # warm-up — discarded
-            ms = time_run(cmd, p, env)     # probe time
-            probe[(tag, label)] = ms
-            log(f"  {tag:15s}  {label:10s}  {ms:.0f} ms")
+            time_run(cmd, p, env)                     # warm-up — discarded
+            algo, wall_ms = time_run(cmd, p, env)     # probe
+            # Budget on the algorithm time: that is what each extra in-process
+            # repeat costs. Parsing is paid once per (case, algorithm), not per
+            # trial, so it is accounted for separately in calc_trials.
+            algo_ms = algo[-1] if algo else wall_ms
+            probe[(tag, label)] = {"algo": algo_ms, "wall": wall_ms}
+            log(f"  {tag:15s}  {label:10s}  wall={wall_ms:.0f} ms  algo={algo_ms:.2f} ms")
     return probe
 
 
 def calc_trials(probe, cases, bins, target_ms, min_t, max_t):
     """
-    trials = max(min_t, min(max_t, floor(T / (k · budget))))
+    trials = max(min_t, min(max_t, floor((T/k − parse) / algo)))
 
-    T       = target_ms  (total budget for this size)
-    k       = len(bins)  (number of algorithms)
-    budget  = slowest probe time across all algorithms for this size
+    T      = target_ms  (total budget for this size)
+    k      = len(bins)  (number of algorithms)
+    parse  = fixed cost of reading the graph, paid once per (case, algorithm)
+    algo   = slowest per-repeat algorithm time for this size
 
-    Each algorithm gets an equal share T/k of the budget.
+    Because repeats happen inside one process, the graph is parsed once and
+    each extra trial costs only `algo`. Before --repeat existed, every trial
+    paid the full parse, which capped the 1m case at the 3-trial minimum.
     """
     trials = {}
     k = len(bins)
     for tag, *_ in cases:
         if not data_path(tag).exists():
             continue
-        budget = max(
-            (probe.get((tag, label), 1e9) for label, _, _ in bins),
-            default=1000.0,
-        )
+        entries = [probe[(tag, label)] for label, _, _ in bins
+                   if (tag, label) in probe]
+        if not entries:
+            continue
+        algo_budget  = max(e["algo"] for e in entries)
+        # Parse cost ≈ whole process minus the one algorithm run it contained.
+        parse_budget = max(e["wall"] - e["algo"] for e in entries)
+
         per_algo_budget = target_ms / k
-        t = max(min_t, min(max_t, int(per_algo_budget // budget)))
+        usable = per_algo_budget - parse_budget
+        t = max(min_t, min(max_t, int(usable // algo_budget) if algo_budget > 0 else max_t))
         trials[tag] = t
-        log(f"  {tag:15s}  slowest={budget:.0f} ms  per-algo budget={per_algo_budget:.0f} ms"
-            f"  → {t} trials")
+        log(f"  {tag:15s}  parse≈{parse_budget:.0f} ms  slowest algo={algo_budget:.2f} ms"
+            f"  per-algo budget={per_algo_budget:.0f} ms  → {t} trials")
     return trials
 
 
@@ -321,14 +376,29 @@ def run_timing(cases, bins, trials):
         t = trials.get(tag, 3)
         log(f"[{done}/{total}] {tag}  n={n:,} m={m:,}  trials={t}")
         for label, cmd, env in bins:
-            time_run(cmd, p, env)                              # warm-up (discarded)
-            times = [time_run(cmd, p, env) for _ in range(t)]
-            results[(tag, label)] = times
+            # One process, t+1 in-process repeats; the first is the warm-up and
+            # is discarded.
+            all_algo, wall_ms = time_run(cmd, p, env, repeat=t + 1)
+            timed = all_algo[1:] if len(all_algo) > 1 else all_algo
+
+            rec = {
+                "algo":       timed,
+                "wall_total": wall_ms,
+                # Everything the process did that wasn't MST construction:
+                # spawn, parse the graph file, print the result.
+                "parse_ms":   wall_ms - sum(all_algo),
+                # Fallback series for a binary built without bench_harness.h.
+                "wall":       [] if timed else [wall_ms],
+            }
+            results[(tag, label)] = rec
+
+            times = primary_times(rec)
             mu  = statistics.mean(times)
             sig = statistics.stdev(times) if len(times) > 1 else 0.0
             th  = t_hat(mu, n, m, label)
-            log(f"    {label:10s}  {mu:8.1f} ms  σ={sig:5.1f}  "
-                f"t̂={th:9.1f} ops/ms  [min={min(times):.0f} max={max(times):.0f}]")
+            log(f"    {label:10s}  {mu:8.2f} ms  σ={sig:5.2f}  "
+                f"t̂={th:9.1f} ops/ms  [min={min(times):.2f} max={max(times):.2f}]"
+                f"  (parse {rec['parse_ms']:.0f} ms, once)")
     return results
 
 
@@ -436,21 +506,26 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
     timing_csv = out_dir / "bench_timing.csv"
     with open(timing_csv, "w", newline="") as f:
         w = csv.writer(f)
+        # mean_ms is MST construction only. wall_mean_ms is the whole process
+        # including parsing the graph file — reported for reference, not for
+        # comparing algorithms.
         w.writerow([
             "tag", "n", "m", "trials", "algo",
             "mean_ms", "min_ms", "max_ms", "sigma_ms",
+            "parse_ms", "wall_total_ms",
             "t_hat_ops_per_ms", "vs_boruvka", "vs_bms",
         ])
         for tag, n, m, _ in cases:
             if not data_path(tag).exists():
                 continue
-            bor_times = timing_results.get((tag, "boruvka"), [])
-            bms_times = timing_results.get((tag, "bms"),     [])
-            bor_mu = statistics.mean(bor_times) if bor_times else None
-            bms_mu = statistics.mean(bms_times) if bms_times else None
+            bor_t = primary_times(timing_results.get((tag, "boruvka"), {}))
+            bms_t = primary_times(timing_results.get((tag, "bms"),     {}))
+            bor_mu = statistics.mean(bor_t) if bor_t else None
+            bms_mu = statistics.mean(bms_t) if bms_t else None
             t_val  = trials.get(tag, "?")
             for label, _, _ in bins:
-                times = timing_results.get((tag, label), [])
+                rec   = timing_results.get((tag, label), {})
+                times = primary_times(rec)
                 if not times:
                     continue
                 mu  = statistics.mean(times)
@@ -458,8 +533,11 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
                 th  = t_hat(mu, n, m, label)
                 w.writerow([
                     tag, n, m, t_val, label,
-                    f"{mu:.2f}", f"{min(times):.0f}", f"{max(times):.0f}",
-                    f"{sig:.2f}", f"{th:.2f}",
+                    f"{mu:.3f}", f"{min(times):.3f}", f"{max(times):.3f}",
+                    f"{sig:.3f}",
+                    f"{rec.get('parse_ms', 0.0):.1f}",
+                    f"{rec.get('wall_total', 0.0):.1f}",
+                    f"{th:.2f}",
                     f"{bor_mu / mu:.4f}" if bor_mu and label != "boruvka" else "",
                     f"{bms_mu / mu:.4f}" if bms_mu and label != "bms"     else "",
                 ])
@@ -510,6 +588,10 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
     A("```")
     A("t̂ = θ₀(n, m) / T_mean")
     A("")
+    A("T_mean = MST construction time only, measured inside each binary with")
+    A("         steady_clock after parsing and before printing. It does NOT")
+    A("         include reading the graph file or writing the MST out.")
+    A("")
     A("boruvka / par_T*:  θ₀ = m · log₂(n)              [O(m log n)]")
     A("bms:               θ₀ = n · (log₂ n)^(2/3)        [O(n log^{2/3} n)]")
     A("")
@@ -521,13 +603,16 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
 
     A("### Trials formula\n")
     A("```")
-    A("trials = max(min_trials, min(max_trials, floor(T / (k · budget))))")
+    A("trials = max(min_trials, min(max_trials, floor((T/k − parse) / algo)))")
     A("")
-    A("T      = total target time (ms) for this size")
-    A("k      = number of algorithms compared")
-    A("budget = slowest single-run probe time (ms) for this size")
+    A("T     = total target time (ms) for this size")
+    A("k     = number of algorithms compared")
+    A("parse = fixed cost of reading the graph, paid ONCE per (size, algorithm)")
+    A("algo  = slowest per-repeat MST construction time (ms) for this size")
     A("")
-    A("Each algorithm receives an equal share T/k of the budget.")
+    A("Trials are in-process repeats (--repeat), so the graph is parsed once")
+    A("and each extra trial costs only `algo`. The first repeat is discarded")
+    A("as a warm-up.")
     A("Defaults: min_trials = 3, max_trials = 60")
     A("```\n")
 
@@ -558,21 +643,27 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
         A("| | | | | | | | |")
 
     A("\n## t̂ and Timing Results\n")
+    A("*Mean (ms) is MST construction only, measured inside each binary with "
+      "steady_clock after parsing and before printing. Parse (ms) is everything "
+      "else the process did — reading the graph file and printing — paid once "
+      "per (size, algorithm) rather than once per trial, and excluded from the "
+      "comparison.*\n")
     A("*vs boruvka = boruvka mean / algo mean; "
       "vs bms = bms mean / algo mean. Ratios > 1 indicate the algorithm is "
       "faster than the reference.*\n")
-    A("| Size | n | m | trials | algo | Mean (ms) | σ | t̂ (ops/ms) | vs boruvka | vs bms |")
-    A("|------|---|---|--------|------|-----------|---|-----------|-----------|--------|")
+    A("| Size | n | m | trials | algo | Mean (ms) | σ | Parse (ms) | t̂ (ops/ms) | vs boruvka | vs bms |")
+    A("|------|---|---|--------|------|-----------|---|------------|-----------|-----------|--------|")
     for tag, n, m, _ in cases:
         if not data_path(tag).exists():
             continue
-        bor_times = timing_results.get((tag, "boruvka"), [])
-        bms_times = timing_results.get((tag, "bms"),     [])
-        bor_mu = statistics.mean(bor_times) if bor_times else None
-        bms_mu = statistics.mean(bms_times) if bms_times else None
+        bor_t = primary_times(timing_results.get((tag, "boruvka"), {}))
+        bms_t = primary_times(timing_results.get((tag, "bms"),     {}))
+        bor_mu = statistics.mean(bor_t) if bor_t else None
+        bms_mu = statistics.mean(bms_t) if bms_t else None
         t_val  = trials.get(tag, "?")
         for label, _, _ in bins:
-            times = timing_results.get((tag, label), [])
+            rec   = timing_results.get((tag, label), {})
+            times = primary_times(rec)
             if not times:
                 continue
             mu  = statistics.mean(times)
@@ -581,8 +672,9 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
             vs_bor = f"{bor_mu / mu:.2f}×" if bor_mu and label != "boruvka" else "—"
             vs_bms = f"{bms_mu / mu:.2f}×" if bms_mu and label != "bms"     else "—"
             A(f"| {tag} | {n:,} | {m:,} | {t_val} | {label} "
-              f"| {mu:.1f} | {sig:.1f} | **{th:.0f}** | {vs_bor} | {vs_bms} |")
-        A("| | | | | | | | | | |")
+              f"| {mu:.2f} | {sig:.2f} | {rec.get('parse_ms', 0.0):.0f} "
+              f"| **{th:.0f}** | {vs_bor} | {vs_bms} |")
+        A("| | | | | | | | | | | |")
 
     # Convergence table (sparse series only)
     A("\n## Convergence Analysis (Sparse graphs, m ≈ 5n)\n")
@@ -597,8 +689,8 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
             continue
         bms_xi_vals = xi_agg.get((tag, "bms"),     [])
         bor_xi_vals = xi_agg.get((tag, "boruvka"), [])
-        bms_t_vals  = timing_results.get((tag, "bms"),     [])
-        bor_t_vals  = timing_results.get((tag, "boruvka"), [])
+        bms_t_vals  = primary_times(timing_results.get((tag, "bms"),     {}))
+        bor_t_vals  = primary_times(timing_results.get((tag, "boruvka"), {}))
         if not bms_xi_vals or not bor_xi_vals:
             continue
         xi_bms = statistics.mean(bms_xi_vals)
