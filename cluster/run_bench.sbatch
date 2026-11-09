@@ -60,7 +60,23 @@ echo "Toolchain OK"
 # Generated graphs total roughly 600 MB. If your home directory has a small
 # quota, point SCRATCH at your scratch filesystem instead and the script will
 # run there.
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Slurm copies the batch script to a spool directory before running it, so
+# ${BASH_SOURCE[0]} points at /var/spool/.../slurm_script rather than this
+# repository. SLURM_SUBMIT_DIR is the directory sbatch was run from, which is
+# what we want; the BASH_SOURCE form is the fallback for running this script
+# directly outside Slurm.
+if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
+    REPO_ROOT="$SLURM_SUBMIT_DIR"
+else
+    REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
+
+if [[ ! -d "$REPO_ROOT/src" ]]; then
+    echo "ERROR: no src/ under '$REPO_ROOT'. Submit with 'sbatch cluster/run_bench.sbatch'" >&2
+    echo "       from the repository root, so SLURM_SUBMIT_DIR points at it." >&2
+    exit 1
+fi
+
 cd "$REPO_ROOT/src"
 
 echo "--- Working in $(pwd) ---"
