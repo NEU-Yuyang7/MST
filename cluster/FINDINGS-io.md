@@ -159,9 +159,13 @@ by building `bms_xi` from `BMSBoruvka.cpp -DBMS_XI` and retiring
 `bms_instrumented.cpp`. I left it alone because deciding which trace is correct
 is a question about the algorithm, not the harness.
 
-Note also that ξ (shrinkage factor) is unaffected by any of this — it is a
-count of components per step, not a timing, so Table 4 and the ξ analysis stand
-as published.
+To be clear about what the I/O fix does and doesn't touch: ξ is a count of
+components per step, not a timing, so nothing in the timing work above changes
+it. Table 4's numbers came from `bms_instrumented.cpp` and are internally
+consistent with that binary. But if the `BMSBoruvka.cpp -DBMS_XI` trace is the
+correct one, Table 4 describes an implementation that has since been replaced,
+and the ξ analysis would need regenerating along with the timings. That is the
+question above, and it should be settled before either table is final.
 
 ## Still outstanding
 
