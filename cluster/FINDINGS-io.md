@@ -13,6 +13,12 @@ GCC 11.5.0, 8 cores, exclusive allocation, 22m33s, all eight sizes passing the
 correctness check. Raw output is in `src/results/job-11742193/` and
 `logs/bench-11742193.out`.
 
+**That job predates `8783258`**, which fixed the ξ source, the t̂ formula and
+`--n-seeds`. The timings in Part 2 are unaffected — that commit changed
+instrumentation and a reporting formula, not any algorithm — but the ξ numbers
+and the absolute t̂ values are from the old code. Part 3 says what changed and
+what a re-run would buy.
+
 ---
 
 ## Part 1 — The measurement defect
@@ -145,6 +151,13 @@ Both fall to 500k and rebound at 1m. With I/O removed this is measuring
 something real — most plausibly cache and memory-bandwidth effects rather than
 comparison counts. **Section 6.4's conclusion needs re-deriving.**
 
+The bms column was computed with the old θ₀ = `n·(log₂ n)^(2/3)`. Since
+`8783258` it is `m·(log₂ n)^(2/3)`, and this series has m = 5n, so every bms
+figure above is multiplied by exactly 5 — 99540, 88405, 52855, 69560. Borůvka's
+θ₀ is unchanged. A constant factor cannot create or remove convergence, so the
+shape of the curve and the conclusion both stand; only the absolute numbers in
+that column are stale.
+
 ### Parallel Borůvka underperforms
 
 `par_T2` is *slower* than serial Borůvka nearly everywhere — 0.41× at 10k,
@@ -154,49 +167,75 @@ speedup needs restating.
 
 ---
 
-## Part 3 — Open problems
+## Part 3 — Problems found, and where they now stand
 
-### 1. ξ instrumentation is broken on dense graphs
+These four were open when job `11742193` ran. `8783258` addresses the first
+three. That commit was authored by Claude in Yuyang's session and committed
+under his account, so the diagnoses below are its reasoning, not a human
+review of it — and none of the fixes has been exercised on the cluster yet.
 
-Both dense cases report `ξ_μ = 1.00` with an empty step count:
+### 1. ξ instrumentation was broken on dense graphs — fixed, unverified
+
+Both dense cases reported `ξ_μ = 1.00` with an empty step count:
 
 | size | algo | ξ_μ | ξ_theory | steps |
 |---|---|---:|---:|---:|
 | dense_50k | bms | 1.00 | 128.0 | *(blank)* |
 | dense_100k | bms | 1.00 | 128.0 | *(blank)* |
 
-That is `xi_per_step` coming back empty, so the geometric mean falls back to
-1.0. Either dense inputs take a path the instrumentation doesn't cover, or the
-trace is never populated there. **The dense ξ rows are currently unusable.**
+`xi_per_step` came back empty, so the geometric mean fell back to 1.0.
 
-### 2. Two ξ implementations disagree
+Cause and fix in `8783258`: `bms_instrumented.cpp` jumped to `done` as soon as
+the MST was complete and so never recorded the final super-step — under-counting
+on sparse graphs and recording nothing at all on dense ones. That file is
+deleted; `bms_xi` is now built from `BMSBoruvka.cpp -DBMS_XI`. A step count of
+0 also no longer prints as blank, so a genuine zero is distinguishable from a
+missing value.
 
-`BMSBoruvka.cpp -DBMS_XI` and `bms_instrumented.cpp` disagree on the same input:
+**Still to confirm on a real run.** The dense path is the one that produced
+nothing before, and it is the one least like what the fix was reasoned about.
+Nobody has yet seen a non-empty dense ξ trace; the claim that there now is one
+rests on the argument above and nothing else.
+
+### 2. Two ξ implementations disagreed — fixed
+
+`BMSBoruvka.cpp -DBMS_XI` and `bms_instrumented.cpp` gave different answers on
+the same input:
 
 | source | steps_actual | ξ_μ |
 |---|---:|---:|
-| `bms_instrumented.cpp` (what `run_bench.py` uses) | 2 | 40.82 |
+| `bms_instrumented.cpp` (what `run_bench.py` used) | 2 | 40.82 |
 | `BMSBoruvka.cpp -DBMS_XI` | 3 | 21.54 |
 
-Pre-existing: upstream `BMSBoruvka.cpp` with none of these changes gives the
-same 3 / 21.54. `run_bench.py` builds `bms_xi` from one and times `bms` from
-the other, so the ξ table and the timing table describe **two different
-implementations**. Deciding which trace is correct is a question about the
-algorithm, not the harness.
+`run_bench.py` built `bms_xi` from one and timed `bms` from the other, so the ξ
+table and the timing table described two different implementations. Both now
+come from `BMSBoruvka.cpp`, and the 3 / 21.54 trace is the one kept — consistent
+with problem 1, where the discarded implementation was the one dropping a step.
+The ξ rows in `src/results/job-11742193/bench_xi.csv` are therefore from the
+rejected source and should not be quoted.
 
-### 3. t̂ is not comparable across densities for bms
+### 3. t̂ was not comparable across densities — fixed
 
-θ₀ for `bms` is `n·(log₂ n)^(2/3)` — no `m` term. At m = 50n the formula ignores
-almost all the work, which is why the dense rows read 1940 and 1743 against
-~10000–20000 on sparse. Those are an artifact of the metric, not a performance
-collapse, and should not be presented as comparable.
+θ₀ for `bms` was `n·(log₂ n)^(2/3)`, with no `m` term, so at m = 50n the formula
+ignored almost all the work and the dense rows read 1940 and 1743 against
+~10000–20000 on sparse — an artifact of the metric, not a performance collapse.
+It is now `m·(log₂ n)^(2/3)`, matching the O(m log^{2/3} n) bound in the
+abstract, so t̂ is comparable both across densities and against Borůvka. The
+convergence table is restricted to an explicit `SPARSE_SERIES` list rather than
+matching on tag substrings.
 
-### 4. `--n-seeds` does nothing
+### 4. `--n-seeds` did nothing — implemented
 
-Parsed and documented, but `args.n_seeds` appears nowhere after `parse_args()`.
-Every case uses seed 42 only, so the reported σ is variance across repeated
-runs on one fixed graph, not across graph instances. Left alone because it
-changes what gets measured.
+Every case used seed 42 only, so the reported σ was variance across repeated
+runs on one fixed graph. `--n-seeds K` now generates K instances per case
+(seeds `seed` … `seed+K-1`), verifies and times every algorithm on each, and
+reports `σ_inst`, the spread of the per-instance means, alongside the
+within-run σ.
+
+This is the one that most affects Part 2. The bms-vs-Borůvka ratio there is
+non-monotone — 1.29×, 1.59×, 1.34×, 1.58× — and with a single graph per size
+there is no way to tell a real effect from one unlucky instance. `--n-seeds 3`
+on the sparse series would settle it.
 
 ---
 
