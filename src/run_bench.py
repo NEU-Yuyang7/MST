@@ -104,16 +104,35 @@ def log(msg, level="INFO"):
     print(f"[{time.strftime('%H:%M:%S')}] {level:5s}  {msg}", flush=True)
 
 
+TIMEOUT_RC = 124   # conventional exit status for a timed-out command
+
+
 def run_cmd(cmd, *, stdin=None, capture_out=False, capture_err=False,
             env=None, timeout=600):
-    r = subprocess.run(
-        cmd,
-        stdin=open(stdin) if isinstance(stdin, (str, Path)) else stdin,
-        stdout=subprocess.PIPE if capture_out  else subprocess.DEVNULL,
-        stderr=subprocess.PIPE if capture_err  else subprocess.DEVNULL,
-        env={**os.environ, **(env or {})},
-        timeout=timeout,
-    )
+    """
+    Run cmd, returning (returncode, stdout, stderr).
+
+    A timeout returns TIMEOUT_RC rather than raising. An uncaught
+    TimeoutExpired here used to abort the entire benchmark with a traceback —
+    one binary looping on one graph would destroy a multi-hour job after
+    everything else had already succeeded. Callers decide what a timeout means.
+    """
+    fh = open(stdin) if isinstance(stdin, (str, Path)) else stdin
+    try:
+        r = subprocess.run(
+            cmd,
+            stdin=fh,
+            stdout=subprocess.PIPE if capture_out  else subprocess.DEVNULL,
+            stderr=subprocess.PIPE if capture_err  else subprocess.DEVNULL,
+            env={**os.environ, **(env or {})},
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return TIMEOUT_RC, "", f"timed out after {timeout}s"
+    finally:
+        # subprocess.run does not close a handle we opened.
+        if fh is not None and fh is not stdin:
+            fh.close()
     return (
         r.returncode,
         r.stdout.decode() if capture_out  and r.stdout else "",
@@ -169,13 +188,24 @@ def primary_times(rec):
 
 
 def get_weight(cmd, stdin, env=None):
-    """Run cmd and parse 'Total weight = ...' from stdout."""
-    _, out, _ = run_cmd(cmd, stdin=stdin, capture_out=True,
-                        env={**os.environ, **(env or {})})
+    """
+    Run cmd and parse 'Total weight = ...' from stdout.
+
+    Returns the weight as a string, or a marker describing what went wrong:
+    "<timeout>" if it exceeded the limit, "<crash rc=N>" if it died (a stack
+    overflow from unbounded recursion shows up here as rc=-11), or "<no output>"
+    if it exited cleanly without printing a weight. These markers compare
+    unequal to a real weight, so verify_all reports them as a mismatch and
+    names the algorithm.
+    """
+    rc, out, _ = run_cmd(cmd, stdin=stdin, capture_out=True,
+                         env={**os.environ, **(env or {})})
+    if rc == TIMEOUT_RC:
+        return "<timeout>"
     for line in out.splitlines():
         if line.startswith("Total weight"):
             return line.split("=")[1].strip()
-    return None
+    return f"<crash rc={rc}>" if rc != 0 else "<no output>"
 
 
 def data_path(tag):
@@ -296,7 +326,18 @@ def verify_all(cases, bins):
         if len(set(weights.values())) == 1:
             log(f"  OK   {tag:15s}  weight = {list(weights.values())[0]}")
         else:
-            log(f"  FAIL {tag}: {weights}", "ERROR")
+            # Separate "this one broke" from "these disagree" — they need very
+            # different investigation, and lumping them into one dict dump made
+            # the cause hard to see.
+            broken = {l: w for l, w in weights.items() if w and w.startswith("<")}
+            agreed = {l: w for l, w in weights.items() if l not in broken}
+            log(f"  FAIL {tag}", "ERROR")
+            for label, why in broken.items():
+                log(f"         {label:15s} {why}", "ERROR")
+            if len(set(agreed.values())) > 1:
+                log(f"         disagreement among the rest: {agreed}", "ERROR")
+            elif agreed:
+                log(f"         the rest agree on {list(agreed.values())[0]}", "ERROR")
             failures += 1
     if failures:
         log(f"{failures} correctness failure(s). Aborting.", "ERROR")

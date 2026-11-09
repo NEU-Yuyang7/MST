@@ -108,6 +108,24 @@ static void filter_kruskal(vector<Edge>& E, DSU& dsu) {
     }
     E.clear(); E.shrink_to_fit();  // free memory
 
+    // Guard against a partition that makes no progress.
+    //
+    // The pivot is the median weight and the split is `<= pivot`, so if more
+    // than half the remaining edges share that weight, every edge lands in
+    // `light`, `heavy` is empty, and the recursive call below gets a vector of
+    // exactly the same size — unbounded recursion, then a stack overflow.
+    // The all-equal-weights graph (gen --weights uniform) hits this on the
+    // very first call.
+    //
+    // No further partitioning can separate these edges, so sort them and run
+    // the greedy scan directly. That is the base case, just reached by size
+    // rather than by weight distribution.
+    if (heavy.empty()) {
+        filter(light, dsu);
+        kruskal_base(light, dsu);
+        return;
+    }
+
     // Recurse on light half
     filter_kruskal(light, dsu);
     light.clear(); light.shrink_to_fit();
