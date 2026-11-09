@@ -38,16 +38,23 @@ echo "=== Job $SLURM_JOB_ID on $(hostname) ==="
 echo "Started: $(date)"
 
 # --- 1. Toolchain ----------------------------------------------------------
-# The sources use <bits/stdc++.h> (a GCC-only header) and OpenMP, so a real
-# GCC is required. Adjust the module name to whatever your cluster provides —
-# `module avail gcc` will list the options.
-module purge
-module load gcc/12.2.0
-module load python/3.10.13
-
+# No modules needed on this cluster: the system compiler is GCC 11.5.0, which
+# has C++17, <bits/stdc++.h> (GCC-only) and OpenMP. If you move this script to
+# a cluster whose default compiler is older than GCC 9, or is Clang, you will
+# need `module load` lines here — `module spider gcc` finds the candidates.
 echo "--- Toolchain ---"
 g++ --version | head -1
 python3 --version
+
+# Fail early and loudly rather than part-way through a 4-hour job.
+# TMPDIR is not guaranteed to be set, and `set -u` above would abort on it.
+PROBE_DIR="${TMPDIR:-/tmp}"
+printf '#include <bits/stdc++.h>\n#include <omp.h>\nint main(){std::vector<int> v{1};return omp_get_max_threads()>0?0:1;}\n' > "$PROBE_DIR/probe.cpp"
+if ! g++ -O2 -std=c++17 -fopenmp "$PROBE_DIR/probe.cpp" -o "$PROBE_DIR/probe"; then
+    echo "ERROR: compiler cannot build C++17 + bits/stdc++.h + OpenMP" >&2
+    exit 1
+fi
+echo "Toolchain OK"
 
 # --- 2. Where to work ------------------------------------------------------
 # Generated graphs total roughly 600 MB. If your home directory has a small

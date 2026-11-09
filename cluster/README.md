@@ -34,28 +34,32 @@ writes CSV + Markdown reports. You never have to invoke `g++` by hand.
 
 ## Step by step on the cluster
 
-### 1. Log in and find a compiler
+### 1. Check the compiler
+
+The sources use `#include <bits/stdc++.h>`, a GCC-specific convenience header,
+and `parallel_boruvka.cpp` needs OpenMP. This one-liner checks all three
+requirements at once:
 
 ```bash
-module avail gcc
+printf '#include <bits/stdc++.h>\n#include <omp.h>\nint main(){std::vector<int> v{1,2,3};return omp_get_max_threads()>0?0:1;}\n' > /tmp/probe.cpp && g++ -O2 -std=c++17 -fopenmp /tmp/probe.cpp -o /tmp/probe && echo "ALL GOOD: C++17 + bits/stdc++.h + OpenMP"
 ```
 
-The sources use `#include <bits/stdc++.h>`, which is a GCC-specific
-convenience header, and `parallel_boruvka.cpp` needs OpenMP. Any reasonably
-recent GCC has both. Load one:
+On Northeastern's Discovery the system compiler is GCC 11.5.0 and this passes
+with no modules loaded, which is why `run_bench.sbatch` has no `module load`
+lines. The script re-runs this probe at the top of the job and aborts if it
+fails, rather than dying part-way through.
+
+If you move this to a cluster whose default `g++` is older than GCC 9, or is
+Clang, you will need modules. `module avail gcc` is case-sensitive and misses
+modules hidden behind a hierarchy, so prefer:
 
 ```bash
-module load gcc/12.2.0
+module spider gcc
 ```
 
-Then check it worked:
-
-```bash
-g++ --version
-```
-
-If `gcc/12.2.0` doesn't exist on your cluster, pick whatever `module avail gcc`
-listed and edit the `module load` line in `run_bench.sbatch` to match.
+Then add the `module load` line back into `run_bench.sbatch`. Note that
+`module` writes to stderr, so piping its output into `grep` without `2>&1`
+makes it look like nothing was found.
 
 ### 2. Don't benchmark on the login node
 
@@ -122,8 +126,10 @@ full batch job.
 
 Three settings in `run_bench.sbatch` matter and are cluster-specific:
 
-- **`--partition=short`** — the partition names are different on every cluster.
-  `sinfo -s` lists yours.
+- **`--partition=short`** — correct on Discovery, where `short` is the default
+  partition with a 2-day limit. `sinfo -s` lists the alternatives. Avoid
+  `sharing`: it caps at 1 hour and, as the name says, puts you on a node with
+  other jobs, which makes the timings meaningless.
 - **`--exclusive`** — keep it. Sharing a node with another job makes memory
   bandwidth contention show up as algorithm differences.
 - **`--cpus-per-task=8`** — must be at least the largest value you pass to
