@@ -63,20 +63,36 @@ makes it look like nothing was found.
 
 ### 2. Don't benchmark on the login node
 
-The login node is shared with everyone else on the cluster, so timings taken
-there are noise. It is fine for a quick smoke test, though — this takes a few
-seconds and confirms the toolchain works:
+Two separate reasons, and the second one bites immediately:
+
+1. The login node is shared, so any timing taken there is noise.
+2. **Discovery runs a watchdog that kills CPU-heavy processes on login nodes.**
+   `run_bench.py --build` compiles eight binaries and gets killed part-way
+   through. This is not a "try to be polite" situation — it simply will not
+   complete.
+
+So even the smoke test needs an allocation. Grab a small interactive node:
+
+```bash
+srun --partition=short --cpus-per-task=4 --mem=16G --time=01:00:00 --pty bash
+```
+
+Note there is no `--exclusive` here. You want it for real timing runs, but for
+a smoke test it only makes you queue — `short` often has just one or two idle
+nodes. Once the shell lands, `cd` back to the repository and run:
 
 ```bash
 cd src
-g++ -O2 -std=c++17 boruvka.cpp -o boruvka
-g++ -O2 gen.cpp -o gen
-./gen 10000 50000 --seed 42 --connected > /tmp/smoke.txt
-./boruvka < /tmp/smoke.txt | head -1
+python3 run_bench.py --build --gen --sizes 10k --target-sec 10 --no-par
 ```
 
-You should see `Total weight = 1209420330843` — the same value this project
-produces on any machine, since the generator is seeded.
+You should see `Build complete.`, then
+`OK   10k   weight = 1209420330843`, then `All algorithms agree.` That weight
+is the same on any machine, since the generator is seeded — a different value
+means something is genuinely wrong, not machine variation.
+
+`--no-par` is deliberate: this is checking that everything builds and agrees,
+and OpenMP numbers from a 4-core slice tell you nothing.
 
 ### 3. Submit the real run
 
@@ -102,25 +118,26 @@ tail -f logs/bench-<jobid>.out
 Results land in `src/results/job-<jobid>/`: `bench_timing.csv`,
 `bench_xi.csv`, and a human-readable `bench_report.md`.
 
-### 4. If you'd rather watch it run interactively
+### 4. Scaling up interactively, before committing to the batch job
 
-Grab a compute node for an hour and run it by hand — useful the first time, so
-you see failures immediately instead of in a log file:
+Between the smoke test and the full run, it is worth doing a middling run by
+hand so you see failures immediately rather than in a log file. From the same
+interactive shell as step 2, or a fresh one with more cores:
 
 ```bash
-srun --partition=short --cpus-per-task=8 --mem=32G --time=01:00:00 --pty bash
+srun --partition=short --cpus-per-task=8 --mem=32G --exclusive --time=01:00:00 --pty bash
 ```
 
-then
-
 ```bash
-module load gcc/12.2.0 python/3.10.13
 cd src
-python3 run_bench.py --build --gen --sizes 10k,100k --target-sec 20
+python3 run_bench.py --build --gen --sizes 10k,100k --target-sec 60
 ```
 
-Start with the small sizes like that. Once it completes cleanly, submit the
-full batch job.
+`--exclusive` this time, because now the numbers matter. No modules — the
+system GCC is fine (see step 1).
+
+This exercises the parallel binary too, so it is where OpenMP problems would
+surface. Once it completes cleanly, submit the full batch job.
 
 ## What you need to check before trusting the numbers
 
