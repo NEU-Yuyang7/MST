@@ -44,7 +44,7 @@ requirements at once:
 printf '#include <bits/stdc++.h>\n#include <omp.h>\nint main(){std::vector<int> v{1,2,3};return omp_get_max_threads()>0?0:1;}\n' > /tmp/probe.cpp && g++ -O2 -std=c++17 -fopenmp /tmp/probe.cpp -o /tmp/probe && echo "ALL GOOD: C++17 + bits/stdc++.h + OpenMP"
 ```
 
-On Northeastern's Discovery the system compiler is GCC 11.5.0 and this passes
+On Northeastern's Explorer the system compiler is GCC 11.5.0 and this passes
 with no modules loaded, which is why `run_bench.sbatch` has no `module load`
 lines. The script re-runs this probe at the top of the job and aborts if it
 fails, rather than dying part-way through.
@@ -66,7 +66,7 @@ makes it look like nothing was found.
 Two separate reasons, and the second one bites immediately:
 
 1. The login node is shared, so any timing taken there is noise.
-2. **Discovery runs a watchdog that kills CPU-heavy processes on login nodes.**
+2. **Explorer runs a watchdog that kills CPU-heavy processes on login nodes.**
    `run_bench.py --build` compiles eight binaries and gets killed part-way
    through. This is not a "try to be polite" situation — it simply will not
    complete.
@@ -143,7 +143,7 @@ surface. Once it completes cleanly, submit the full batch job.
 
 Three settings in `run_bench.sbatch` matter and are cluster-specific:
 
-- **`--partition=short`** — correct on Discovery, where `short` is the default
+- **`--partition=short`** — correct on Explorer, where `short` is the default
   partition with a 2-day limit. `sinfo -s` lists the alternatives. Avoid
   `sharing`: it caps at 1 hour and, as the name says, puts you on a node with
   other jobs, which makes the timings meaningless.

@@ -8,7 +8,7 @@ the old harness and needs regenerating.** The reported speedup drops from ~2.5×
 to 1.27–1.78×, but a much stronger result emerges in its place — see
 "What the data actually says".
 
-Measurements below are from cluster job `11742193` on Discovery node `d0064`,
+Measurements below are from cluster job `11742193` on Explorer node `d0064`,
 GCC 11.5.0, 8 cores, exclusive allocation, 22m33s, all eight sizes passing the
 correctness check. Raw output is in `src/results/job-11742193/` and
 `logs/bench-11742193.out`.
