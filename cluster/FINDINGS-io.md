@@ -1,11 +1,23 @@
-# The benchmark was measuring text I/O, not MST construction
+# Benchmark findings
 
-Found and fixed 2026-11-08. **Every wall-clock number in the Benchmark section
-of the paper was produced by the old harness and needs regenerating.** The
-reported speedup drops from ~2.5× to ~1.3–1.6× — but it now grows with `n`
-instead of staying flat, which is the better result. See "What changes" below.
+Two things are documented here: a measurement defect that invalidated the
+published timings, and what the numbers look like once it is fixed.
 
-## The problem
+**Every wall-clock number in the Benchmark section of the paper was produced by
+the old harness and needs regenerating.** The reported speedup drops from ~2.5×
+to 1.27–1.78×, but a much stronger result emerges in its place — see
+"What the data actually says".
+
+Measurements below are from cluster job `11742193` on Discovery node `d0064`,
+GCC 11.5.0, 8 cores, exclusive allocation, 22m33s, all eight sizes passing the
+correctness check. Raw output is in `src/results/job-11742193/` and
+`logs/bench-11742193.out`.
+
+---
+
+## Part 1 — The measurement defect
+
+### What was wrong
 
 `run_bench.py` used to time whole processes:
 
@@ -16,168 +28,191 @@ return (time.perf_counter() - t0) * 1000.0
 ```
 
 So each measurement was process spawn + parse the graph from a text file +
-compute the MST + format and write every MST edge to stdout. Only the third of
-those is the algorithm. The paper's claim that "Program output was redirected
-to /dev/null to exclude I/O from timings" doesn't hold: redirecting to
-`/dev/null` discards the bytes only after `cout` has already formatted them,
-and it does nothing at all about parsing a 113 MB input file.
+compute the MST + format and write every MST edge to stdout. Only the third is
+the algorithm. The paper's claim that "Program output was redirected to
+/dev/null to exclude I/O from timings" doesn't hold: redirecting to `/dev/null`
+discards bytes only after `cout` has formatted them, and does nothing about
+parsing a 113 MB input file.
 
-To quantify it I built a `null_mst` binary that reads the input exactly as the
-real programs do and prints `n-1` lines exactly as they do, but performs no MST
-computation whatsoever. On the 1m sparse case (n=1,000,000, m=5,000,000):
+A `null_mst` binary that reads the input exactly as the real programs do and
+prints `n-1` lines exactly as they do, but performs no MST computation at all,
+took **18.07 s** on the 1m case where `boruvka` took 19.56 s. **92–99% of every
+published timing was text handling.**
 
-| Binary | Wall clock | Minus I/O floor |
+A second, compounding problem: `boruvka.cpp` and `parallel_boruvka.cpp` were
+the only sources without `ios::sync_with_stdio(false)`. On libstdc++ that is
+worth several times on input-heavy programs. So the baseline paid full stream
+synchronisation cost on an I/O-bound workload while every algorithm it was
+compared against did not — which is why Kruskal appeared 3.10× faster at n=10k
+and 3.21× at n=100k, a near-constant advantage across an order of magnitude,
+pointing against the asymptotics. With clean timing Kruskal is **1.09×** at 10k
+and 1.44× at 100k, varying with `n` as it should.
+
+### What was changed
+
+- **New `src/bench_harness.h`** — fast I/O, `--quiet`, in-process timing, `--repeat`.
+- **Each binary times itself** with `steady_clock`, after parsing and before
+  printing, reporting on stderr as JSON. `run_bench.py` reads that instead of
+  wrapping the process.
+- **`--quiet`** suppresses the per-edge dump; `Total weight = ...` still prints,
+  so the correctness check is unaffected.
+- **`--repeat K`** runs the computation K times on one parse, first discarded as
+  warm-up. Entry points that mutate their input get a fresh copy per repeat,
+  outside the timed region.
+- **Fast I/O for `boruvka` and `parallel_boruvka`**, like everything else.
+
+### A bug this surfaced
+
+`1m_ties` had evidently never been run. `filter_kruskal` picks the median
+weight as pivot and splits `<= pivot` into light, `> pivot` into heavy; when
+more than half the remaining edges share the median weight, every edge lands in
+light, heavy comes back empty, and it recurses on an identically-sized vector.
+Unbounded recursion, stack overflow, SIGSEGV. The all-equal-weights graph hits
+it on the first call.
+
+Pre-existing — `f676330`'s `filter_kruskal` segfaults identically. Fixed by
+falling back to the base case when the partition cannot make progress.
+
+---
+
+## Part 2 — What the data actually says
+
+### BMSBoruvka beats Borůvka at every size
+
+| n | boruvka | bms | ratio |
+|---|---:|---:|---:|
+| 10,000 | 3.63 ms | 2.82 ms | 1.29× |
+| 100,000 | 58.58 ms | 36.82 ms | 1.59× |
+| 500,000 | 449.76 ms | 335.97 ms | 1.34× |
+| 1,000,000 | 834.25 ms | 528.40 ms | 1.58× |
+
+The ratio is not monotone, so it should not be presented as a clean trend. But
+scaling 500k → 1m, `bms` grows by 1.57× against Borůvka's 1.85×, so the
+asymptotic advantage is visible in the scaling even where the ratio wobbles.
+
+### The result the paper should be built around
+
+`bms` is **not** the fastest algorithm overall — Filter-Kruskal is, on most
+graphs. But look at *where* `bms` beats it:
+
+| graph | weight distribution | bms vs filter_kruskal |
+|---|---|---:|
+| 10k | distinct random | 0.75× |
+| 100k | distinct random | 0.67× |
+| 500k | distinct random | 0.47× |
+| 1m | distinct random | 0.75× |
+| dense_50k | distinct random | 0.38× |
+| dense_100k | distinct random | 0.50× |
+| **1m_small** | **ints in [1,100]** | **1.05×** |
+| **1m_ties** | **all weights equal** | **2.11×** |
+
+`bms` wins on exactly the two low-entropy weight distributions and loses on
+every distinct-random one. On `1m_ties` it is the fastest algorithm in the
+suite by a wide margin:
+
+| algo | 1m_ties (ms) |
+|---|---:|
+| **bms** | **587.13** |
+| par_T4 | 653.98 |
+| boruvka | 1046.57 |
+| kruskal | 1066.99 |
+| filter_kruskal | 1240.85 |
+
+1.78× over Borůvka and 2.11× over Filter-Kruskal.
+
+**This is the thesis, demonstrated.** The paper argues that comparison sorting
+is the bottleneck and that selection-based activation avoids it. These numbers
+say precisely that: the advantage appears exactly where sorting degenerates and
+disappears where sorting is easy. That is a sharper, more falsifiable claim
+than "faster than Borůvka", and it is supported by the data rather than
+contradicted by it.
+
+Section 6 should lead with the weight-distribution result, not a single
+headline speedup.
+
+### t̂ does not converge
+
+The convergence analysis wants t̂ to flatten as `n` grows. It does not:
+
+| n | t̂ (bms) | t̂ (boruvka) |
 |---|---:|---:|
-| `null_mst` (no algorithm at all) | 18,070 ms | — |
-| `boruvka` | 19,560 ms | ~1,490 ms |
-| `bms` | 19,130 ms | ~1,060 ms |
-| `kruskal` | 18,370 ms | ~300 ms |
-| `filter_kruskal` | 18,218 ms | ~150 ms |
+| 10,000 | 19908 | 182998 |
+| 100,000 | 17681 | 141774 |
+| 500,000 | 10571 | 105230 |
+| 1,000,000 | 13912 | 119458 |
 
-92–99% of every published timing was text parsing and printing. (These were
-measured on the pre-3bebedd binaries, which is why `bms` here is slower than in
-the results further down.)
+Both fall to 500k and rebound at 1m. With I/O removed this is measuring
+something real — most plausibly cache and memory-bandwidth effects rather than
+comparison counts. **Section 6.4's conclusion needs re-deriving.**
 
-There was a second, compounding problem. `boruvka.cpp` and
-`parallel_boruvka.cpp` were the only two sources *not* calling
-`ios::sync_with_stdio(false)` — every binary they were compared against had it.
-On libstdc++ that is routinely worth 3–5× on input-heavy programs. So the
-baseline was paying full stream-synchronisation cost on a workload that was
-almost entirely I/O, while the challengers weren't.
+### Parallel Borůvka underperforms
 
-That is exactly the shape of the old results in `analysis/bench_timing.csv`:
-Kruskal came out 3.10× faster than Borůvka at n=10k and 3.21× at n=100k.
-Kruskal does a full comparison sort of all `m` edges — strictly more work than
-Borůvka's `O(m log n)` — so a near-constant 3.2× advantage across an order of
-magnitude in `n`, pointing against the asymptotics, was never an algorithmic
-effect.
+`par_T2` is *slower* than serial Borůvka nearly everywhere — 0.41× at 10k,
+0.78× at 100k, 0.95× at 500k, 0.90× at 1m. `par_T4` reaches only 1.18–1.39× on
+four threads, and beats serial only from 100k upward. Any claim of parallel
+speedup needs restating.
 
-## The fix
+---
 
-**1. `src/bench_harness.h` (new).** A small shared header giving every binary
-fast I/O, a `--quiet` flag, in-process timing, and `--repeat K`.
+## Part 3 — Open problems
 
-**2. Each binary times itself.** `std::chrono::steady_clock` wraps the MST
-computation only — after parsing, before printing — and the result goes to
-stderr as `{"type":"timing","ms":...}`. `run_bench.py` reads that number
-instead of wrapping the process with a stopwatch. Parsing, printing and process
-spawn are now outside the measurement by construction.
+### 1. ξ instrumentation is broken on dense graphs
 
-**3. `--quiet` suppresses the per-edge dump** during timing runs. The
-`Total weight = ...` line is still printed, so the correctness check is
-unaffected.
+Both dense cases report `ξ_μ = 1.00` with an empty step count:
 
-**4. `--repeat K` runs the MST computation K times on one parse**, reporting
-each separately, with the first discarded as a warm-up. Parsing the 1m graph
-costs ~17.5 s against an algorithm time of ~0.7 s, so paying it per trial
-capped that case at the 3-trial minimum. Amortising it lifted the 100k case
-from 4 trials to 60, and σ from ~2.6% to ~1%.
+| size | algo | ξ_μ | ξ_theory | steps |
+|---|---|---:|---:|---:|
+| dense_50k | bms | 1.00 | 128.0 | *(blank)* |
+| dense_100k | bms | 1.00 | 128.0 | *(blank)* |
 
-Entry points that mutate their input (`kruskal`, `filter_kruskal`,
-`BMSBoruvka`) get a fresh copy per repeat, made outside the timed region.
-`boruvka` and `parallel_boruvka` take `const vector<Edge>&` and need no copy.
+That is `xi_per_step` coming back empty, so the geometric mean falls back to
+1.0. Either dense inputs take a path the instrumentation doesn't cover, or the
+trace is never populated there. **The dense ξ rows are currently unusable.**
 
-**5. `boruvka.cpp` and `parallel_boruvka.cpp` now get fast I/O** like everything
-else, via `bench::init()`. This no longer affects the comparison — I/O is
-outside the timed region now — but it makes the wall-clock figures honest too.
+### 2. Two ξ implementations disagree
 
-Verified: all five binaries still produce `Total weight = 1209420330843` on the
-seeded 10k graph, with and without `--quiet`, and identically across repeats.
-
-## What changes
-
-Measurements below are on the **current** `src/BMSBoruvka.cpp`, i.e. after
-commit 3bebedd ("Fix BMS-Boruvka implementation"). That rewrite is a large
-improvement on its own — roughly 2.2× faster than the previous implementation
-at both 10k and 100k — so the numbers here reflect both changes together.
-
-Clean timing, sparse series (macOS, Apple Clang; ratios are what matter, not
-absolutes):
-
-| n | boruvka | kruskal | filter_kruskal | bms | bms vs boruvka |
-|---|---:|---:|---:|---:|---:|
-| 10,000 | 2.29 ms | 2.58 ms | 1.46 ms | 1.76 ms | **1.30×** |
-| 100,000 | 30.40 ms | 33.80 ms | 18.24 ms | 21.92 ms | **1.39×** |
-| 1,000,000 | 641.55 ms | 390.71 ms | 243.94 ms | 399.38 ms | **1.61×** |
-
-Two things are worth noting.
-
-**BMSBoruvka does beat Borůvka, and the margin grows with n** — 1.30× → 1.39×
-→ 1.61×. That is the signature the theory predicts: an advantage that widens
-as `n` increases. It is a sounder result than the original 2.5×, which was
-constant across sizes and came from a measurement dominated by text I/O.
-
-**Kruskal's phantom 3.2× is gone.** It is now slower than Borůvka at 10k and
-100k and faster at 1m — a ratio that varies with `n`, as it should, rather than
-the suspiciously flat 3.10×/3.21× the old harness produced.
-
-For reference, the old published figures in `analysis/bench_timing.csv` were
-boruvka 38.88 / kruskal 12.53 / bms 15.52 ms at 10k and 419.92 / 130.64 /
-163.95 at 100k — measured on a different machine, so compare the ratios.
-
-## What this means for the paper
-
-The direction of Section 6's claim survives; the magnitude does not, and the
-reasoning behind it has to be restated.
-
-- **The speedup figures need replacing.** 2.51–2.56× becomes roughly 1.3–1.6×,
-  rising with `n`. The prose should make the trend the point, because the trend
-  is the part that follows from the complexity analysis. A flat speedup across
-  sizes — which is what the old table showed — is evidence *against* an
-  asymptotic claim, not for it.
-
-- **Report the crossover.** The margin is still widening at n=10⁶ and
-  `TEST_CASES` stops there. Adding 2m/5m/10m would show how far it goes, and a
-  measured growth curve is a far stronger result than a single ratio.
-
-- **t̂ is not converging.** The convergence analysis wants t̂ to flatten as `n`
-  grows. On clean data it falls: bms 31890 → 29699 → 18407, boruvka 289593 →
-  273220 → 155339. With I/O removed this is measuring something real, and at
-  10⁶ it is most likely cache and memory-bandwidth effects rather than the
-  comparison count. Section 6.4's conclusion needs re-deriving.
-
-## One discrepancy to resolve
-
-`src/BMSBoruvka.cpp` now carries its own ξ instrumentation behind `#ifdef
-BMS_XI`, described in the source as "same format as the old
-bms_instrumented.cpp". The two disagree on the same input:
+`BMSBoruvka.cpp -DBMS_XI` and `bms_instrumented.cpp` disagree on the same input:
 
 | source | steps_actual | ξ_μ |
 |---|---:|---:|
-| `bms_instrumented.cpp` (what run_bench.py uses) | 2 | 40.82 |
+| `bms_instrumented.cpp` (what `run_bench.py` uses) | 2 | 40.82 |
 | `BMSBoruvka.cpp -DBMS_XI` | 3 | 21.54 |
 
-I confirmed this is pre-existing, not something the merge introduced: the
-upstream `BMSBoruvka.cpp` compiled with `-DBMS_XI`, with none of my changes,
-gives the same 3 / 21.54.
+Pre-existing: upstream `BMSBoruvka.cpp` with none of these changes gives the
+same 3 / 21.54. `run_bench.py` builds `bms_xi` from one and times `bms` from
+the other, so the ξ table and the timing table describe **two different
+implementations**. Deciding which trace is correct is a question about the
+algorithm, not the harness.
 
-This matters because `run_bench.py` builds `bms_xi` from `bms_instrumented.cpp`
-but times `bms` from `BMSBoruvka.cpp`. So the ξ table and the timing table
-would describe **two different implementations**. Whichever is right, they
-should come from the same binary before the numbers go in the paper — easiest
-by building `bms_xi` from `BMSBoruvka.cpp -DBMS_XI` and retiring
-`bms_instrumented.cpp`. I left it alone because deciding which trace is correct
-is a question about the algorithm, not the harness.
+### 3. t̂ is not comparable across densities for bms
 
-To be clear about what the I/O fix does and doesn't touch: ξ is a count of
-components per step, not a timing, so nothing in the timing work above changes
-it. Table 4's numbers came from `bms_instrumented.cpp` and are internally
-consistent with that binary. But if the `BMSBoruvka.cpp -DBMS_XI` trace is the
-correct one, Table 4 describes an implementation that has since been replaced,
-and the ξ analysis would need regenerating along with the timings. That is the
-question above, and it should be settled before either table is final.
+θ₀ for `bms` is `n·(log₂ n)^(2/3)` — no `m` term. At m = 50n the formula ignores
+almost all the work, which is why the dense rows read 1940 and 1743 against
+~10000–20000 on sparse. Those are an artifact of the metric, not a performance
+collapse, and should not be presented as comparable.
 
-## Still outstanding
+### 4. `--n-seeds` does nothing
 
-`run_bench.py --n-seeds` is parsed and documented but never used — `args.n_seeds`
-appears nowhere after `parse_args()`. Every case uses seed 42 only, so the
-reported σ is variance across repeated runs on one fixed graph, not across graph
-instances. If the paper wants to claim results hold across random instances,
-this needs implementing. I left it alone because it changes what gets measured,
-which is your call rather than a bug fix.
+Parsed and documented, but `args.n_seeds` appears nowhere after `parse_args()`.
+Every case uses seed 42 only, so the reported σ is variance across repeated
+runs on one fixed graph, not across graph instances. Left alone because it
+changes what gets measured.
 
-One caveat on `--repeat`: in-process repeats run with warm caches and a warm
-allocator. Discarding the first repeat is the conventional handling and the
-remaining spread is small (σ well under 1% at 10k and 100k), but these are
-warm-cache numbers. If you want cold-cache figures, run with `--repeat 1` and a
-large `--target-sec`.
+---
+
+## Notes on reading the results
+
+**`overhead_ms` is not parse cost.** It is whole-process wall clock minus the
+sum of the timed regions, so it includes spawning, loading the binary over the
+networked filesystem, parsing, printing, and — for the algorithms that mutate
+their input — the per-repeat copy of the edge vector. That is why it differs
+between algorithms on the same input. It is excluded from every comparison.
+
+**Repeats run warm.** In-process repeats have warm caches and a warm allocator.
+Discarding the first is the conventional handling and the remaining spread is
+small (σ typically well under 1%), but these are warm-cache numbers. For
+cold-cache figures use `--repeat 1` with a large `--target-sec`.
+
+**Borůvka is the noisiest.** σ of 39.11 ms at 1m (4.7%) and 14.28 ms on
+`1m_small`, against well under 1% for most others. Worth understanding before
+quoting its numbers to three significant figures.

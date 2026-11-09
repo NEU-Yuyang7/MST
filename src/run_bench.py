@@ -375,7 +375,8 @@ def calc_trials(probe, cases, bins, target_ms, min_t, max_t):
 
     T      = target_ms  (total budget for this size)
     k      = len(bins)  (number of algorithms)
-    parse  = fixed cost of reading the graph, paid once per (case, algorithm)
+    parse  = fixed per-process overhead (spawn + read the graph + print),
+             paid once per (case, algorithm)
     algo   = slowest per-repeat algorithm time for this size
 
     Because repeats happen inside one process, the graph is parsed once and
@@ -392,14 +393,15 @@ def calc_trials(probe, cases, bins, target_ms, min_t, max_t):
         if not entries:
             continue
         algo_budget  = max(e["algo"] for e in entries)
-        # Parse cost ≈ whole process minus the one algorithm run it contained.
-        parse_budget = max(e["wall"] - e["algo"] for e in entries)
+        # Per-process overhead ≈ whole process minus the single algorithm run
+        # it contained (the probe uses repeat=1).
+        overhead_budget = max(e["wall"] - e["algo"] for e in entries)
 
         per_algo_budget = target_ms / k
-        usable = per_algo_budget - parse_budget
+        usable = per_algo_budget - overhead_budget
         t = max(min_t, min(max_t, int(usable // algo_budget) if algo_budget > 0 else max_t))
         trials[tag] = t
-        log(f"  {tag:15s}  parse≈{parse_budget:.0f} ms  slowest algo={algo_budget:.2f} ms"
+        log(f"  {tag:15s}  overhead≈{overhead_budget:.0f} ms  slowest algo={algo_budget:.2f} ms"
             f"  per-algo budget={per_algo_budget:.0f} ms  → {t} trials")
     return trials
 
@@ -425,9 +427,13 @@ def run_timing(cases, bins, trials):
             rec = {
                 "algo":       timed,
                 "wall_total": wall_ms,
-                # Everything the process did that wasn't MST construction:
-                # spawn, parse the graph file, print the result.
-                "parse_ms":   wall_ms - sum(all_algo),
+                # Everything the process did that was NOT inside a timed
+                # region: spawning, loading the binary, parsing the graph,
+                # printing, and — for the algorithms that mutate their input —
+                # the per-repeat copy of the edge vector. It is NOT parse cost
+                # alone, so do not read it as one: it varies between algorithms
+                # on the same input for exactly that reason.
+                "overhead_ms": wall_ms - sum(all_algo),
                 # Fallback series for a binary built without bench_harness.h.
                 "wall":       [] if timed else [wall_ms],
             }
@@ -439,7 +445,7 @@ def run_timing(cases, bins, trials):
             th  = t_hat(mu, n, m, label)
             log(f"    {label:10s}  {mu:8.2f} ms  σ={sig:5.2f}  "
                 f"t̂={th:9.1f} ops/ms  [min={min(times):.2f} max={max(times):.2f}]"
-                f"  (parse {rec['parse_ms']:.0f} ms, once)")
+                f"  (overhead {rec['overhead_ms']:.0f} ms, once)")
     return results
 
 
@@ -553,7 +559,7 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
         w.writerow([
             "tag", "n", "m", "trials", "algo",
             "mean_ms", "min_ms", "max_ms", "sigma_ms",
-            "parse_ms", "wall_total_ms",
+            "overhead_ms", "wall_total_ms",
             "t_hat_ops_per_ms", "vs_boruvka", "vs_bms",
         ])
         for tag, n, m, _ in cases:
@@ -576,7 +582,7 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
                     tag, n, m, t_val, label,
                     f"{mu:.3f}", f"{min(times):.3f}", f"{max(times):.3f}",
                     f"{sig:.3f}",
-                    f"{rec.get('parse_ms', 0.0):.1f}",
+                    f"{rec.get('overhead_ms', 0.0):.1f}",
                     f"{rec.get('wall_total', 0.0):.1f}",
                     f"{th:.2f}",
                     f"{bor_mu / mu:.4f}" if bor_mu and label != "boruvka" else "",
@@ -685,15 +691,18 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
 
     A("\n## t̂ and Timing Results\n")
     A("*Mean (ms) is MST construction only, measured inside each binary with "
-      "steady_clock after parsing and before printing. Parse (ms) is everything "
-      "else the process did — reading the graph file and printing — paid once "
-      "per (size, algorithm) rather than once per trial, and excluded from the "
-      "comparison.*\n")
+      "steady_clock after parsing and before printing. Overhead (ms) is "
+      "everything the process did outside the timed region — spawning, loading "
+      "the binary, parsing the graph, printing, and for the algorithms that "
+      "mutate their input, the per-repeat copy of the edge vector. It is paid "
+      "once per (size, algorithm), is excluded from the comparison, and is NOT "
+      "parse cost alone — which is why it differs between algorithms on the "
+      "same input.*\n")
     A("*vs boruvka = boruvka mean / algo mean; "
       "vs bms = bms mean / algo mean. Ratios > 1 indicate the algorithm is "
       "faster than the reference.*\n")
-    A("| Size | n | m | trials | algo | Mean (ms) | σ | Parse (ms) | t̂ (ops/ms) | vs boruvka | vs bms |")
-    A("|------|---|---|--------|------|-----------|---|------------|-----------|-----------|--------|")
+    A("| Size | n | m | trials | algo | Mean (ms) | σ | Overhead (ms) | t̂ (ops/ms) | vs boruvka | vs bms |")
+    A("|------|---|---|--------|------|-----------|---|---------------|-----------|-----------|--------|")
     for tag, n, m, _ in cases:
         if not data_path(tag).exists():
             continue
@@ -713,7 +722,7 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
             vs_bor = f"{bor_mu / mu:.2f}×" if bor_mu and label != "boruvka" else "—"
             vs_bms = f"{bms_mu / mu:.2f}×" if bms_mu and label != "bms"     else "—"
             A(f"| {tag} | {n:,} | {m:,} | {t_val} | {label} "
-              f"| {mu:.2f} | {sig:.2f} | {rec.get('parse_ms', 0.0):.0f} "
+              f"| {mu:.2f} | {sig:.2f} | {rec.get('overhead_ms', 0.0):.0f} "
               f"| **{th:.0f}** | {vs_bor} | {vs_bms} |")
         A("| | | | | | | | | | | |")
 
