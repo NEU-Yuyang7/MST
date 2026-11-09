@@ -55,7 +55,7 @@ g++ -O2 -std=c++17 kruskal.cpp -o kruskal
 g++ -O2 -std=c++17 filter_kruskal.cpp -o filter_kruskal
 g++ -O2 -std=c++17 BMSBoruvka.cpp -o bms
 g++ -O2 -std=c++17 -fopenmp parallel_boruvka.cpp -o parallel_boruvka
-g++ -O2 -std=c++17 bms_instrumented.cpp -o bms_xi
+g++ -O2 -std=c++17 -DBMS_XI BMSBoruvka.cpp -o bms_xi
 g++ -O2 -std=c++17 boruvka_xi.cpp -o boruvka_xi
 g++ -O2 gen.cpp -o gen
 ```
@@ -219,7 +219,7 @@ Please adjust the `#SBATCH` options according to cluster policy and the actual j
 ## Notes on experimental reproducibility
 
 - The default random seed is `42` (`--seed 42`). Record any change.
-- The driver accepts `--n-seeds`, but verify its actual integration before relying on it for independent-instance aggregation; a command-line option alone does not establish that multiple graph inputs are generated and measured.
+- `--n-seeds K` generates K graph instances per case (seeds `seed` … `seed+K-1`) and times every algorithm on each. Means pool all instances; the `σ_inst` column is the spread of per-instance means. The `--target-sec` budget applies per instance, so total run time grows roughly K-fold.
 - The smoke test and the full benchmark have separate output directories to avoid overwriting output CSV files.
 - The benchmark performs an MST-weight cross-check by default; it is a basic consistency check, not a full formal correctness proof.
 - Because source code and compilation behavior may change, the commands should be tested on the target cluster before being treated as validated experimental procedure.

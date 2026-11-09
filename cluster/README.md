@@ -225,12 +225,10 @@ That gives a 50 s per-algorithm budget, ~32 s of which is usable, for roughly
 
 ## Still outstanding
 
-**`--n-seeds` does nothing.** The flag is defined in `run_bench.py` and
-documented as averaging over several independent graph instances, but the
-parsed value is never used — every run uses seed 42 only. So the reported σ is
-run-to-run variance on one fixed graph, not variance across graphs. If the
-paper needs the latter, that flag has to be implemented first. I left it alone
-because it changes what gets measured rather than fixing something broken.
+**`--n-seeds` is now implemented**, but job `11742193` predates it, so those
+results are from seed 42 only and their σ is run-to-run variance on one fixed
+graph. Re-run with `--n-seeds K` to get `σ_inst`, the spread across graph
+instances.
 
 ## Running it on your Mac
 

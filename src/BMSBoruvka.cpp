@@ -63,7 +63,8 @@
  *      inter-component edge is left. Previously the result could be an
  *      incomplete spanning tree on a connected graph.
  *   6. Compiling with -DBMS_XI emits the ξ trace (JSON lines on stderr);
- *      bms_instrumented.cpp is now this same file with BMS_XI defined.
+ *      run_bench.py builds bms_xi this way; bms_instrumented.cpp is retired
+ *      (it skipped the final super-step, so it under-counted steps).
  *
  * Usage:  ./bms [--phase-a=select|radix] [--t=N] < graph.txt
  */
