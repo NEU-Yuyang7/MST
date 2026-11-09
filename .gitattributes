@@ -1,0 +1,7 @@
+# Benchmark result artifacts are a record of what a particular run produced,
+# so preserve them byte-for-byte. Python's csv.writer emits CRLF per RFC 4180;
+# without this, Git normalises to LF and the committed file no longer matches
+# the file the job wrote, which shows up as spurious diffs when a later run is
+# compared against this one.
+src/results/** -text
+logs/** -text
