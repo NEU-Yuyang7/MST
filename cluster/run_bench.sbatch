@@ -17,6 +17,15 @@
 #     mkdir -p logs
 #     sbatch cluster/run_bench.sbatch
 #
+# Anything after the script name is passed straight through to run_bench.py,
+# so a one-off run needs no edit to this file:
+#     sbatch cluster/run_bench.sbatch --sizes 10k,100k,500k,1m --n-seeds 3
+#
+# Because argparse keeps the last occurrence of an option, a passed-through
+# flag overrides the default set below — e.g. `--target-sec 600` wins over the
+# `--target-sec 300` in section 4. Slurm's own options still belong before the
+# script name: `sbatch --time=01:00:00 cluster/run_bench.sbatch --xi-only`.
+#
 # Watch it:   squeue --me
 # Tail it:    tail -f logs/bench-<jobid>.out
 # Cancel it:  scancel <jobid>
@@ -95,13 +104,23 @@ export OMP_PLACES=cores
 # per-algorithm budget was exhausted before a single trial ran and the 1m case
 # fell back to the 3-trial minimum. 300 s gives it ~45 trials; the smaller
 # sizes hit the 60-trial cap either way.
+#
+# "$@" forwards whatever followed the script name on the sbatch line. It comes
+# last so those flags override the defaults above rather than the other way
+# round. Echoed first so the log records what was actually run — the defaults
+# below are no longer the whole story once this is used.
+if [[ $# -gt 0 ]]; then
+    echo "--- Extra arguments: $* ---"
+fi
+
 python3 run_bench.py \
     --build \
     --gen \
     --target-sec 300 \
     --par-threads 2,4 \
     --xi-repeats 3 \
-    --output-dir "results/job-${SLURM_JOB_ID}"
+    --output-dir "results/job-${SLURM_JOB_ID}" \
+    "$@"
 
 echo "Finished: $(date)"
 echo "Results in: $REPO_ROOT/src/results/job-${SLURM_JOB_ID}"
