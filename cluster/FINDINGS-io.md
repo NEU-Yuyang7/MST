@@ -152,11 +152,19 @@ something real — most plausibly cache and memory-bandwidth effects rather than
 comparison counts. **Section 6.4's conclusion needs re-deriving.**
 
 The bms column was computed with the old θ₀ = `n·(log₂ n)^(2/3)`. Since
-`8783258` it is `m·(log₂ n)^(2/3)`, and this series has m = 5n, so every bms
-figure above is multiplied by exactly 5 — 99540, 88405, 52855, 69560. Borůvka's
-θ₀ is unchanged. A constant factor cannot create or remove convergence, so the
-shape of the curve and the conclusion both stand; only the absolute numbers in
-that column are stale.
+`8783258` it is `m·(log₂ n)^(2/3)`, so on this series (m = 5n) the figures
+rescale by 5. Job `11805997` re-measured them under the new formula:
+
+| n | t̂ (bms) | t̂ (boruvka) |
+|---|---:|---:|
+| 10,000 | 100317 | 192022 |
+| 100,000 | 87227 | 142759 |
+| 500,000 | 67401 | 107199 |
+| 1,000,000 | 69535 | 119677 |
+
+Same shape: both fall to 500k and rebound at 1m. A constant factor cannot
+create or remove convergence, and it didn't. **Section 6.4's conclusion still
+needs re-deriving.** Quote these figures rather than the ones above.
 
 ### Parallel Borůvka underperforms
 
@@ -234,8 +242,114 @@ within-run σ.
 
 This is the one that most affects Part 2. The bms-vs-Borůvka ratio there is
 non-monotone — 1.29×, 1.59×, 1.34×, 1.58× — and with a single graph per size
-there is no way to tell a real effect from one unlucky instance. `--n-seeds 3`
-on the sparse series would settle it.
+there is no way to tell a real effect from one unlucky instance. Answered by
+job `11805997`; see Part 4.
+
+### 5. `boruvka_xi.cpp` had the same bug as `bms_instrumented.cpp` — fixed here
+
+Found while checking Part 4's ξ arithmetic. `if(mst_cnt==n-1)goto done;` fired
+inside the union loop, before the round's `C_after` was read, ξ pushed, or
+`round` incremented. So Borůvka's **final round was never recorded** — the same
+defect, in the same place, as the one `8783258` deleted `bms_instrumented.cpp`
+for. It survived because that commit replaced the bms instrumentation rather
+than auditing the pattern.
+
+Verified on a 1000-node graph, before and after:
+
+| | rounds recorded | ξ_μ | implied final C |
+|---|---:|---:|---:|
+| before | 3 | 4.8075 | 9 |
+| after | 4 | 5.6234 | 1 |
+
+The discarded round was `C_before=9, C_after=1, xi=9.0000` — the largest single
+shrinkage of the run. Total MST weight is unchanged, so only the trace was
+affected.
+
+The correction does not have a consistent direction: it adds one round, so ξ_μ
+moves up or down according to whether that round's shrinkage was above or below
+the mean of the others. On the 1000-node graph it rose, 4.81 → 5.62; on job
+`11805997`'s 10k case it falls, 5.10 → 4.64. **Every Borůvka ξ_μ and round
+count measured before this fix is wrong**, in both directions. The ξ ≥ 2 claim
+survives comfortably either way.
+
+---
+
+## Part 4 — Job 11805997: three graph instances, sparse series
+
+Explorer node `c3004`, 20m06s, `--sizes 10k,100k,500k,1m --n-seeds 3`, seeds
+42–44. Raw output in `src/results/job-11805997/`. Dense cases were not run, so
+Part 3 item 1 is unchanged by this job.
+
+### Graph instance is not the explanation for the ratio spread
+
+σ_inst — the spread of the per-instance means — is small against the effect
+being measured:
+
+| n | bms vs boruvka | σ_inst (bms) | σ_inst (boruvka) |
+|---|---:|---:|---:|
+| 10,000 | 1.24× | 1.8% | 9.2% |
+| 100,000 | 1.56× | 1.5% | 1.8% |
+| 500,000 | 1.68× | 4.8% | 1.7% |
+| 1,000,000 | 1.58× | 3.4% | 2.0% |
+
+The 10k ratio is genuinely below the rest. 500k and 1m differ by roughly one
+σ_inst and should not be distinguished. Treat σ_inst as indicative only: it is
+a standard deviation of three numbers, so its own uncertainty is large, and at
+several points it is no bigger than the within-run σ propagated into the
+instance means.
+
+### bms at 500k is unstable, and that is what the old outlier was
+
+Job `11742193` reported bms at 500k as 335.97 ms, giving a 1.34× ratio that
+broke the trend. This job gives 263.47 ms and 1.68×. The cause is not the
+graph, the node, or the code:
+
+- `8783258`'s only change to `BMSBoruvka.cpp` is a comment, so the timed binary
+  is behaviourally identical between the two jobs.
+- Every other bms figure reproduces within 1.4% — 2.82→2.80, 36.82→37.32,
+  528.40→528.60 — which rules out a machine difference, since that would move
+  all of them.
+- At σ_inst = 12.69 ms the old reading sits about 5.7σ out.
+
+What is left is bms's own variance at that size: σ = 34.67 ms, 13% of its mean
+and by far the largest in the table. Something there is bimodal. **Until that
+is understood, no single-trial bms measurement at 500k should be trusted**, and
+the mechanism is worth finding — it may well affect other sizes less visibly.
+
+### ξ_μ carries no information beyond the step count
+
+This is not a bug and no re-run will change it.
+
+| n | ξ_μ (bms) | n^(1/3) |
+|---|---:|---:|
+| 10,000 | 21.54 | 21.5443 |
+| 100,000 | 46.42 | 46.4159 |
+| 500,000 | 79.37 | 79.3701 |
+| 1,000,000 | 100.00 | 100.0000 |
+
+Four for four, to every digit reported. It is forced by the definition:
+ξ_i = C_i/C_{i+1} telescopes, so ∏ξ_i = C_0/C_final = n/1, and the geometric
+mean over k steps is exactly n^(1/k). Any three-step run on n = 10⁴ gives
+21.54, whether the shrinkage was balanced or wildly skewed.
+
+Part 3 item 5 is the confirmation: completing Borůvka's trace made its ξ_μ
+land on n^(1/rounds) exactly too (5.6234 against 1000^(1/4) = 5.6234). Before
+the fix, neither algorithm telescoped, which is the only reason the identity
+was not obvious — an incomplete trace stops short of C_final = 1 and so returns
+something other than n^(1/k).
+
+Consequences:
+
+- **Comparing measured ξ_μ against ξ_theory = 2^t is a comparison of step
+  counts**, rewritten. At 10k, 2^t = 64 implies about 2.2 super-steps; 3 were
+  observed. That is the actual content, and it is a real result — it is simply
+  not a measurement of shrinkage.
+- **ξ_μ cannot support a claim about the shrinkage *pattern*.** The per-step
+  `xi_per_step` values hold that, and the geometric mean discards it. If
+  Section 6 argues that observed shrinkage matches theory, it needs the
+  per-step distribution, not ξ_μ.
+- A non-empty dense ξ trace will likewise report n^(1/steps). It will confirm
+  that the instrumentation runs, not that the shrinkage is right.
 
 ---
 
