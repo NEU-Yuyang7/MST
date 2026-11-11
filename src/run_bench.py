@@ -18,8 +18,10 @@ Two core metrics:
     T_mean is MST CONSTRUCTION TIME ONLY. Each binary times itself with
     steady_clock after parsing the graph and before printing the MST, and
     reports the result on stderr; this script reads that number. Timing whole
-    processes instead would measure text I/O — on the 1m case ~18 s of the
-    ~19 s total — which swamps every algorithmic difference.
+    processes instead measured text I/O: on the 1m case ~18 s of the ~19 s
+    total, which swamped every algorithmic difference. Most of that was
+    *writing* the MST, which --quiet now suppresses; parsing alone is ~1.2 s
+    for the 113 MB 1m graph.
 
     boruvka / par_T*:  θ₀ = m · log₂(n)              [O(m log n)]
     bms:               θ₀ = m · (log₂ n)^(2/3)        [O(m log^{2/3} n)]
@@ -96,15 +98,52 @@ SOURCES = {
 
 # ── Test cases ─────────────────────────────────────────────────────────────────
 # (tag, n, m, extra_gen_args)
-# Sparse series: m ≈ 5n  →  used for ξ and t̂ convergence analysis
-# Dense series:  m ≈ 50n →  shows BMS degrading to O(m log n)
+#
+# Density is set by mean degree d̄ = 2m/n, against two thresholds that are
+# properties of the graph rather than arbitrary choices:
+#
+#   d̄ = ln n    the Erdős–Rényi connectivity threshold. Below it a uniform
+#               random graph is a.a.s. disconnected.
+#   d̄ = √n      where mean degree outgrows any polylog in n. Above it the
+#               graph is dense in the sense the O(m log n) comparison needs.
+#
+# Three regimes, at 2·ln n, √n/2 and 2·√n. The multipliers are arbitrary; the
+# thresholds they straddle are not.
+#
+# Previously the suite used m = 5n ("sparse") and m = 50n ("dense"). Neither
+# dense case cleared √n — at n = 10⁵, d̄ = 100 against √n = 316 — so m = 50n is
+# a constant factor denser, not asymptotically denser, and cannot show BMS
+# degrading toward O(m log n). The m = 5n series sat *below* ln n from n = 10⁵
+# up, so those graphs were connected only because gen imposed a Hamiltonian
+# path on them.
+#
+# NOTE: a data file is reused whenever test_<tag>.txt exists, so changing the
+# n or m of an existing tag silently reads the old graph. Every case whose
+# size changed therefore has a new tag.
+#
+# Group A — convergence series, d̄ = 2 ln n (m = n ln n). The n-scaling series
+# for ξ and t̂. Above the connectivity threshold, so these are true G(n, m).
+#
+# Group B — density triples at fixed n, spanning ln n → √n → above √n. Group A
+# supplies each triple's lowest-density member, so only two new cases per n.
+#
+# Group C — weight distributions, left at the legacy m = 5n so they stay
+# comparable with jobs 11742193 and 11805997. The 2.11× bms result on 1m_ties
+# is measured against `1m`, which is why that case keeps its old density.
 TEST_CASES = [
-    ("10k",        10_000,      50_000, []),
-    ("100k",      100_000,     500_000, []),
-    ("500k",      500_000,   2_500_000, []),
+    # Group A — d̄ = 2 ln n
+    ("logn_10k",    10_000,      92_103, []),
+    ("logn_30k",    30_000,     309_268, []),
+    ("logn_100k",  100_000,   1_151_292, []),
+    ("logn_300k",  300_000,   3_783_461, []),
+    ("logn_1m",  1_000_000,  13_815_510, []),
+    # Group B — d̄ = √n/2 and 2√n
+    ("rootlo_30k",  30_000,   1_299_038, []),
+    ("roothi_30k",  30_000,   5_196_152, []),
+    ("rootlo_100k", 100_000,  7_905_694, []),
+    ("roothi_100k", 100_000, 31_622_776, []),
+    # Group C — weight distributions, legacy density (d̄ = 10)
     ("1m",      1_000_000,   5_000_000, []),
-    ("dense_50k",   50_000,   2_500_000, []),
-    ("dense_100k", 100_000,   5_000_000, []),
     ("1m_ties",  1_000_000,   5_000_000, ["--weights", "uniform"]),
     ("1m_small", 1_000_000,   5_000_000, ["--weights", "small"]),
     # roadNet-CA: pre-converted from SNAP via convert_snap.py
@@ -114,9 +153,23 @@ TEST_CASES = [
     # ("roadnet_ca", 1_965_206, 2_766_607, []),   # real-world; use --sizes roadnet_ca
 ]
 
-# The sparse series (m = 5n, distinct random weights): the n-scaling series
-# used by the convergence table.
-SPARSE_SERIES = ("10k", "100k", "500k", "1m")
+# Group A: the n-scaling series used by the convergence table. One density
+# regime (d̄ = 2 ln n), so t̂ across these rows varies with n alone.
+SPARSE_SERIES = ("logn_10k", "logn_30k", "logn_100k", "logn_300k", "logn_1m")
+
+# Cases generated with gen --connected. gen imposes a random Hamiltonian path
+# before filling the rest uniformly, so a forced graph is
+# `path ∪ G(n, m-n+1)`: every vertex has degree >= 2 and the degree
+# distribution is roughly 2 + Poisson(d̄-2) rather than Poisson(d̄). That is
+# only acceptable where it is unavoidable.
+#
+# Group C sits at d̄ = 10 against ln(10⁶) = 13.8, where a uniform graph is
+# a.a.s. disconnected, so the path is doing structural work and must stay.
+# Groups A and B are at or above 2 ln n, where P(disconnected) ≈ n·e^(-d̄)
+# = 1/n, so they are generated unforced and are true uniform random graphs.
+# A disconnected draw is not a failure — every algorithm computes the MSF and
+# the weights still agree — it is merely unlikely.
+FORCE_CONNECTED = frozenset({"1m", "1m_ties", "1m_small"})
 
 # Graph instance seeds, set from --seed / --n-seeds in main. SEEDS[0] is the
 # base seed; its data file keeps the original name test_<tag>.txt.
@@ -177,9 +230,9 @@ def time_run(cmd, stdin, env=None, repeat=1):
 
       wall_ms       whole-process wall clock: spawn + parse + K× compute + print.
 
-    algo_ms is the metric. wall_ms is kept only for reference, because it is
-    dominated by text parsing — on the 1m case ~18 s of the ~19 s total is I/O,
-    which buries the differences between algorithms entirely.
+    algo_ms is the metric. wall_ms is kept only for reference: under the old
+    print-everything regime ~18 s of the ~19 s at 1m was text I/O, which buried
+    the differences between algorithms entirely.
     """
     e = {**os.environ, **(env or {})}
     full = list(cmd) + (["--repeat", str(repeat)] if repeat > 1 else [])
@@ -325,8 +378,12 @@ def generate_data(cases):
             if p.exists():
                 log(f"  {p.name} already exists, skipping")
                 continue
-            cmd = [gen_bin, str(n), str(m), "--seed", str(seed), "--connected"] + extra
-            log(f"  Generating {p.name}  (n={n:,} m={m:,} seed={seed})")
+            cmd = [gen_bin, str(n), str(m), "--seed", str(seed)]
+            if tag in FORCE_CONNECTED:
+                cmd.append("--connected")
+            cmd += extra
+            log(f"  Generating {p.name}  (n={n:,} m={m:,} d̄={2*m/n:.1f} "
+                f"seed={seed}{' connected' if tag in FORCE_CONNECTED else ''})")
             with open(p, "w") as fout:
                 if subprocess.run(cmd, stdout=fout, stderr=subprocess.DEVNULL).returncode:
                     log(f"  gen failed for {tag} seed={seed}", "ERROR")
