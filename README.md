@@ -46,9 +46,18 @@ python3 run_bench.py --gen
 
 Default test cases (defined in `TEST_CASES`):
 
-Density is set by mean degree `d̄ = 2m/n`, against two thresholds: `ln n`, the
-Erdős–Rényi connectivity threshold, and `√n`, where mean degree outgrows any
-polylog in `n`.
+Density is set by mean degree `d̄ = 2m/n`, at `2 ln n`, `√n/2` and `2√n`.
+
+The two reference points have different standing. `ln n` is a theorem — the
+Erdős–Rényi sharp threshold, below which a uniform random graph is a.a.s.
+disconnected — and it is also roughly where Fredman–Tarjan's `O(m·β(m,n))`
+gives `O(m)`, since `β` collapses to 1 once `m/n ≥ log n`. `√n` is a reasoned
+choice rather than a convention: there is no standard boundary there. The
+standard notions are coarser (sparse `m = O(n polylog n)`, dense `m = Θ(n²)`
+or `Ω(n^(1+ε))`), and the real line behind them is polylogarithmic versus
+polynomial growth in `d̄`. `√n` is one representative of the polynomial side,
+chosen because `m = Θ(n^1.5)` is the geometric mean of `n` and `n²` and is
+still reachable at these sizes.
 
 | Tag            | n         | m          | `d̄`  | Notes                          |
 | -------------- | --------- | ---------- | ----: | ------------------------------ |

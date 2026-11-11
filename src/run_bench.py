@@ -99,16 +99,35 @@ SOURCES = {
 # ── Test cases ─────────────────────────────────────────────────────────────────
 # (tag, n, m, extra_gen_args)
 #
-# Density is set by mean degree d̄ = 2m/n, against two thresholds that are
-# properties of the graph rather than arbitrary choices:
+# Density is set by mean degree d̄ = 2m/n, at 2·ln n, √n/2 and 2·√n. The two
+# reference points do NOT have equal standing, and it is worth being exact
+# about which is which:
 #
-#   d̄ = ln n    the Erdős–Rényi connectivity threshold. Below it a uniform
-#               random graph is a.a.s. disconnected.
-#   d̄ = √n      where mean degree outgrows any polylog in n. Above it the
-#               graph is dense in the sense the O(m log n) comparison needs.
+#   d̄ = ln n   A THEOREM. The Erdős–Rényi sharp threshold: below it a uniform
+#              random graph is a.a.s. disconnected. Not negotiable.
 #
-# Three regimes, at 2·ln n, √n/2 and 2·√n. The multipliers are arbitrary; the
-# thresholds they straddle are not.
+#              It does double duty here. Fredman–Tarjan is O(m·β(m,n)) with
+#              β(m,n) = min{i : log^(i) n ≤ m/n}, so once m/n ≥ log n — i.e.
+#              d̄ ≥ 2 log n — β collapses to 1 and MST is already O(m) by a
+#              1987 comparison-based algorithm. Group A sits within a constant
+#              factor of that point (natural log puts d̄ = 27.6 at n = 10⁶
+#              against 39.9 for base 2, so just under it).
+#
+#   d̄ = √n     A CHOICE, not a convention. There is no standard sparse/dense
+#              boundary at √n. What is standard is coarser: sparse means
+#              m = O(n) or O(n polylog n), dense means m = Θ(n²) or
+#              m = Ω(n^(1+ε)). The real qualitative line behind those is
+#              polylogarithmic vs polynomial growth in d̄ — no amount of
+#              iterating logs reaches n^ε — and √n is one representative of
+#              the polynomial side, chosen because m = Θ(n^1.5) is the
+#              geometric mean of n and n² and is still reachable at n ≤ 10⁵.
+#              n^(1/3) or n^(2/3) would be defensible too.
+#
+# Note that "beyond any polylog" is asymptotic and weak at these sizes: √n
+# overtakes (log₂ n)² only at n ≈ 10^4.8 and (log₂ n)³ not until n ≈ 10^8.8, so
+# across 10⁴–10⁶ it sits between the square and the cube of the log. The case
+# for 2√n is that it is decisively past m = 50n (d̄ 632 against 100), not that
+# it is qualitatively elsewhere.
 #
 # Previously the suite used m = 5n ("sparse") and m = 50n ("dense"). Neither
 # dense case cleared √n — at n = 10⁵, d̄ = 100 against √n = 316 — so m = 50n is
