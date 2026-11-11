@@ -46,32 +46,16 @@ python3 run_bench.py --gen
 
 Default test cases (defined in `TEST_CASES`):
 
-Density is set by mean degree `d̄ = 2m/n`, against two thresholds: `ln n`, the
-Erdős–Rényi connectivity threshold, and `√n`, where mean degree outgrows any
-polylog in `n`.
-
-| Tag            | n         | m          | `d̄`  | Notes                          |
-| -------------- | --------- | ---------- | ----: | ------------------------------ |
-| `logn_10k`     | 10,000    | 92,103     |  18.4 | d̄ = 2 ln n                     |
-| `logn_30k`     | 30,000    | 309,268    |  20.6 | d̄ = 2 ln n                     |
-| `logn_100k`    | 100,000   | 1,151,292  |  23.0 | d̄ = 2 ln n                     |
-| `logn_300k`    | 300,000   | 3,783,461  |  25.2 | d̄ = 2 ln n                     |
-| `logn_1m`      | 1,000,000 | 13,815,510 |  27.6 | d̄ = 2 ln n, convergence series |
-| `rootlo_30k`   | 30,000    | 1,299,038  |  86.6 | d̄ = √n/2                       |
-| `roothi_30k`   | 30,000    | 5,196,152  | 346.4 | d̄ = 2√n, dense                 |
-| `rootlo_100k`  | 100,000   | 7,905,694  | 158.1 | d̄ = √n/2                       |
-| `roothi_100k`  | 100,000   | 31,622,776 | 632.5 | d̄ = 2√n, dense                 |
-| `1m`           | 1,000,000 | 5,000,000  |  10.0 | weight-distribution control    |
-| `1m_ties`      | 1,000,000 | 5,000,000  |  10.0 | uniform weights (many ties)    |
-| `1m_small`     | 1,000,000 | 5,000,000  |  10.0 | small integer weights [1, 100] |
-
-The `logn_*` series is the n-scaling series: one density regime, so t̂ across
-those rows varies with `n` alone. The `rootlo_*`/`roothi_*` pairs give a
-density sweep at fixed `n`, with the matching `logn_*` case as the third point.
-
-The last three sit at `d̄ = 10`, below `ln(10⁶) = 13.8`, and so are the only
-cases generated with `gen --connected`. They keep that density because the
-weight-distribution results are measured against `1m` as the control.
+| Tag          | n         | m         | Notes                          |
+| ------------ | --------- | --------- | ------------------------------ |
+| `10k`        | 10,000    | 50,000    | sparse, m ≈ 5n                 |
+| `100k`       | 100,000   | 500,000   | sparse                         |
+| `500k`       | 500,000   | 2,500,000 | sparse                         |
+| `1m`         | 1,000,000 | 5,000,000 | sparse, main experiment        |
+| `dense_50k`  | 50,000    | 2,500,000 | dense, m ≈ 50n                 |
+| `dense_100k` | 100,000   | 5,000,000 | dense                          |
+| `1m_ties`    | 1,000,000 | 5,000,000 | uniform weights (many ties)    |
+| `1m_small`   | 1,000,000 | 5,000,000 | small integer weights [1, 100] |
 
 ### 3. Run benchmark
 
@@ -80,7 +64,7 @@ weight-distribution results are measured against `1m` as the control.
 python3 run_bench.py --build --gen --target-sec 60 --output-dir results/
 
 # Specific sizes only
-python3 run_bench.py --sizes logn_100k,logn_1m
+python3 run_bench.py --sizes 100k,1m
 
 # ξ data only (no multi-trial timing)
 python3 run_bench.py --xi-only

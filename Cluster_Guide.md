@@ -39,7 +39,7 @@ set -o pipefail
 python3 run_bench.py \
   --build \
   --gen \
-  --sizes logn_10k \
+  --sizes 10k \
   --target-sec 10 \
   --output-dir results/smoke \
   2>&1 | tee results/smoke/run.log
@@ -85,7 +85,7 @@ mkdir -p results/selected
 set -o pipefail
 python3 run_bench.py \
   --gen \
-  --sizes logn_100k,logn_1m \
+  --sizes 100k,1m \
   --target-sec 60 \
   --output-dir results/selected \
   2>&1 | tee results/selected/run.log

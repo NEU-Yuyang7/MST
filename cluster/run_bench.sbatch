@@ -19,7 +19,7 @@
 #
 # Anything after the script name is passed straight through to run_bench.py,
 # so a one-off run needs no edit to this file:
-#     sbatch cluster/run_bench.sbatch --sizes logn_10k,logn_30k,logn_100k,logn_300k,logn_1m --n-seeds 3
+#     sbatch cluster/run_bench.sbatch --sizes 10k,100k,500k,1m --n-seeds 3
 #
 # Because argparse keeps the last occurrence of an option, a passed-through
 # flag overrides the default set below — e.g. `--target-sec 600` wins over the
@@ -99,15 +99,11 @@ export OMP_PROC_BIND=close
 export OMP_PLACES=cores
 
 # --- 4. Build, generate, run ----------------------------------------------
-# --target-sec 300: the trial count is (target_sec/k - overhead) / algo, where
-# algo is the slowest per-repeat time at that size. At 1m that is par_T2 at
-# ~950 ms and overhead is ~2.7 s, so 60 s would give about 7 trials and 300 s
-# gives 49 — which is what job 11805997 measured. The smaller sizes hit the
-# 60-trial cap either way.
-#
-# (Not, as this comment used to claim, because parsing costs ~17.5 s. That
-# figure included writing n-1 MST edges, which --quiet suppresses; the parse
-# is ~1.2 s for the 113 MB graph.)
+# --target-sec 300: the trial count is (target_sec/k - parse) / algo, and
+# parsing the 1m graph alone costs ~17.5 s. At the old default of 60 s the
+# per-algorithm budget was exhausted before a single trial ran and the 1m case
+# fell back to the 3-trial minimum. 300 s gives it ~45 trials; the smaller
+# sizes hit the 60-trial cap either way.
 #
 # "$@" forwards whatever followed the script name on the sbatch line. It comes
 # last so those flags override the defaults above rather than the other way
