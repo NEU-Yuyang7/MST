@@ -83,7 +83,7 @@ nodes. Once the shell lands, `cd` back to the repository and run:
 
 ```bash
 cd src
-python3 run_bench.py --build --gen --sizes 10k --target-sec 10 --no-par
+python3 run_bench.py --build --gen --sizes logn_10k --target-sec 10 --no-par
 ```
 
 You should see `Build complete.`, then
@@ -130,7 +130,7 @@ srun --partition=short --cpus-per-task=8 --mem=32G --exclusive --time=01:00:00 -
 
 ```bash
 cd src
-python3 run_bench.py --build --gen --sizes 10k,100k --target-sec 60
+python3 run_bench.py --build --gen --sizes logn_10k,logn_100k --target-sec 60
 ```
 
 `--exclusive` this time, because now the numbers matter. No modules — the
@@ -157,27 +157,40 @@ cluster requires one.
 
 ## Disk space
 
-`--gen` writes about 600 MB of graph files into `src/data/`:
+`--gen` writes about 1.7 GB of graph files into `src/data/`, at roughly 22.6
+bytes per edge:
 
-| File | Approx size |
-|---|---|
-| `test_10k.txt` | 1 MB |
-| `test_100k.txt` | 11 MB |
-| `test_500k.txt` | 56 MB |
-| `test_1m.txt` | 113 MB |
-| `test_dense_50k.txt` | 56 MB |
-| `test_dense_100k.txt` | 113 MB |
-| `test_1m_ties.txt` | 113 MB |
-| `test_1m_small.txt` | 100 MB |
+| File | m | Approx size |
+|---|---:|---:|
+| `test_logn_10k.txt` | 92,103 | 2 MB |
+| `test_logn_30k.txt` | 309,268 | 7 MB |
+| `test_logn_100k.txt` | 1,151,292 | 26 MB |
+| `test_logn_300k.txt` | 3,783,461 | 86 MB |
+| `test_logn_1m.txt` | 13,815,510 | 312 MB |
+| `test_rootlo_30k.txt` | 1,299,038 | 29 MB |
+| `test_roothi_30k.txt` | 5,196,152 | 117 MB |
+| `test_rootlo_100k.txt` | 7,905,694 | 179 MB |
+| `test_roothi_100k.txt` | 31,622,776 | 715 MB |
+| `test_1m.txt` | 5,000,000 | 113 MB |
+| `test_1m_ties.txt` | 5,000,000 | 113 MB |
+| `test_1m_small.txt` | 5,000,000 | 100 MB |
 
 Generation is skipped for any file that already exists, so re-running the job
 is cheap. If your home quota is tight, clone the repo onto scratch instead.
+
+**`--n-seeds K` multiplies this by K** — 5.2 GB at K=3 — so scope it with
+`--sizes` rather than applying it to the whole suite.
+
+`roothi_100k` is the one to watch: 31.6M edges is ~506 MB for the edge vector,
+and Filter-Kruskal holds roughly three copies, so budget ~1.5 GB of resident
+memory on top of the file. Well inside the job's 32 G, but it is the case that
+will fail first if you scale `n` up without re-checking.
 
 ## Useful variations
 
 ```bash
 # Just the sparse series the paper's convergence analysis uses
-python3 run_bench.py --sizes 10k,100k,500k,1m --target-sec 60
+python3 run_bench.py --sizes logn_10k,logn_30k,logn_100k,logn_300k,logn_1m --target-sec 60
 
 # Shrinkage factor only, no timing — fast, and the part that is actually
 # machine-independent
@@ -208,20 +221,31 @@ Two flags come out of that fix, both set automatically by `run_bench.py`:
   each timing separately. This is how the harness gets 60 trials out of a graph
   that takes 1.6 s to read.
 
-### Set `--target-sec` high enough at 1m
+### Set `--target-sec` high enough on the large cases
 
-The trial count is `floor((target_sec/k − parse) / algo)`, where `k` is the
-number of algorithms. Parsing the 1m graph takes ~17.5 s, so with the default
-`--target-sec 60` and 6 algorithms the per-algorithm budget of 10 s is gone
-before a single trial runs, and you fall back to the 3-trial minimum. For good
-statistics at 1m use:
+The trial count is `floor((target_sec/k − overhead) / algo)`, where `k` is the
+number of algorithms and `algo` is the slowest per-repeat time at that size.
+
+An earlier version of this section said parsing the 1m graph costs ~17.5 s and
+that `--target-sec 60` therefore fell back to the 3-trial minimum. Both are
+wrong. That 17.5 s came from the original `null_mst` experiment, which included
+*writing* n−1 MST edges — and `--quiet` removed the writing. Job 11805997 shows
+the real overhead at 1m as 1189 ms for Borůvka and 2735 ms for bms; the gap is
+the per-repeat edge-vector copy that the mutating algorithms pay, so parsing
+113 MB is about 1.2 s.
+
+What actually binds is the slowest algorithm. At 1m that is `par_T2` at ~950 ms,
+so `--target-sec 60` gives `(10000 − 2700) / 950` ≈ 7 trials and
+`--target-sec 300` gives `(50000 − 2700) / 950` ≈ 49 — which is exactly what
+job 11805997 reported. Raising it is still worthwhile, just not for the stated
+reason:
 
 ```bash
-python3 run_bench.py --sizes 1m --target-sec 300
+python3 run_bench.py --sizes logn_1m --target-sec 300
 ```
 
-That gives a 50 s per-algorithm budget, ~32 s of which is usable, for roughly
-45 trials. The smaller sizes already hit the 60-trial cap at the default.
+The denser cases need more again: `roothi_100k` carries 31.6M edges against
+1m's 5M, so both the parse and every per-repeat time scale up with it.
 
 ## Still outstanding
 
