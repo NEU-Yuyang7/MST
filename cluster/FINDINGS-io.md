@@ -200,10 +200,12 @@ deleted; `bms_xi` is now built from `BMSBoruvka.cpp -DBMS_XI`. A step count of
 0 also no longer prints as blank, so a genuine zero is distinguishable from a
 missing value.
 
-**Still to confirm on a real run.** The dense path is the one that produced
-nothing before, and it is the one least like what the fix was reasoned about.
-Nobody has yet seen a non-empty dense ξ trace; the claim that there now is one
-rests on the argument above and nothing else.
+**Confirmed locally, not yet on the cluster.** On a local dense_50k graph
+(seeds 42–44) the fixed binary records one step with ξ = 50000 on every seed,
+so the trace is no longer empty. ξ does not depend on the machine, so a cluster
+run should give the same; it has simply not been done yet. With one step there
+is no full step to measure, so the report's `ξ_full` reads N/A for dense bms
+(see "How the report presents ξ now" below).
 
 ### 2. Two ξ implementations disagreed — fixed
 
@@ -350,6 +352,40 @@ Consequences:
   per-step distribution, not ξ_μ.
 - A non-empty dense ξ trace will likewise report n^(1/steps). It will confirm
   that the instrumentation runs, not that the shrinkage is right.
+
+### How the report presents ξ now
+
+`run_bench.py` no longer reports ξ_μ. The final step is excluded from every ξ
+statistic, because it always ends at C = 1 and is therefore a truncated step,
+not a full one. The report and `bench_xi.csv` give instead:
+
+- **Steps**: actual steps against the theory count P = ⌈log₂ n / t⌉ (bms).
+- **ξ_full**: geometric mean of the non-final ξ_i, compared against 2^t (bms).
+  N/A when a run has only one step.
+- **min ξ_full**: the smallest non-final ξ_i, the direct test of ξ ≥ 2
+  (Borůvka).
+
+`xi_geomean_all_steps` (the old ξ_μ) stays in `bench_xi.csv` for reference.
+
+ξ is deterministic given the graph, so it does not need the cluster. Computed
+locally with the fixed binaries on the sparse series, seeds 42–44:
+
+| n | bms steps (P) | ξ_full (bms) | 2^t | min ξ_full (bms) | Borůvka rounds | min ξ_full (Borůvka) |
+|---|---|---:|---:|---:|---|---:|
+| 10,000 | 3 (3) | 45.18 | 64 | 28.25 | 5–6 | 3.94 |
+| 100,000 | 3 (3) | 45.21 | 128 | 30.11 | 7 | 3.95 |
+| 500,000 | 3 (3) | 43.43 | 256 | 29.74 | 8 | 3.94 |
+| 1,000,000 | 3 (3) | 43.67 | 256 | 30.11 | 8 | 3.95 |
+
+What this shows:
+
+- **bms takes exactly the predicted number of super-steps** at every size.
+- **Per-step shrinkage is well below 2^t, and does not grow with it.** ξ_full
+  stays at 43–45 while 2^t goes from 64 to 256. The first super-step shrinks
+  by about 30×, the second by 57–82×. The early super-steps activate only part
+  of the edge set, which is the likely reason, but it has not been checked.
+- **Borůvka's smallest full round is about 3.9×**, comfortably above the ξ ≥ 2
+  bound.
 
 ---
 

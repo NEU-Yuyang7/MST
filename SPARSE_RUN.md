@@ -62,6 +62,8 @@ Results land in `src/results/sparse-<jobid>/`. Open `bench_report.md`, table **"
 Also check:
 - **t̂ (convergence table at the bottom)**: bms values are now about 5× the old ones (θ₀ gained the `m` term).
   What matters is still the shape across n, whether it flattens.
-- **`bench_xi.csv`**: has a `seed` column now. Note that bms `ξ_μ` will be the same on every seed
-  (21.54 at 10k = 10000^(1/3)), because the per-step ξ values multiply out to n. That's the known
-  definition problem, not a bug in this run.
+- **ξ table**: reports actual steps against the theory count P, and `ξ_full`, the geometric mean
+  of the non-final steps, against 2^t. The final step is excluded because it always ends at one
+  component; including it makes the mean exactly n^(1/steps) (21.54 at 10k on every seed), which
+  says nothing about shrinkage. `xi_geomean_all_steps` in `bench_xi.csv` is that old value, kept
+  for reference only.

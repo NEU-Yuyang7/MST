@@ -949,7 +949,7 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
         A("| | | | | | | | | | | | |")
 
     # Convergence table (sparse series only)
-    A("\n## Convergence Analysis (Sparse graphs, m ≈ 5n)\n")
+    A("\n## Convergence Analysis (Sparse series: " + ", ".join(SPARSE_SERIES) + ")\n")
     A("t̂ stabilising → complexity bound is tight. ξ_full (non-final steps "
       "only) is compared against 2^t for bms; min ξ_full ≥ 2 is the Borůvka "
       "bound.\n")

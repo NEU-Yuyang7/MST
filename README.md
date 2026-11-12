@@ -153,7 +153,7 @@ All written to `--output-dir` (default `./results/`):
 | File               | Contents                                                     |
 | ------------------ | ------------------------------------------------------------ |
 | `bench_timing.csv` | Per-(size, algorithm): mean\_ms (MST construction only), min, max, σ, parse\_ms, wall\_total\_ms, t̂, vs\_boruvka ratio, vs\_bms ratio |
-| `bench_xi.csv`     | Per-(size, algorithm, repeat): ξ\_μ, ξ\_theory, steps/rounds, per-step ξ sequence |
+| `bench_xi.csv`     | Per-(size, algorithm, seed, repeat): ξ\_full (geometric mean of the non-final steps), min ξ\_full, ξ\_theory, actual steps/rounds, theory step count P (bms), per-step ξ sequence. `xi_geomean_all_steps` is kept for reference only: it is n^(1/steps) by construction |
 | `bench_report.md`  | Human-readable Markdown report with ξ table, timing table, and convergence analysis |
 
 ## Project Structure
