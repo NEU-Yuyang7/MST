@@ -10,7 +10,20 @@ Two core metrics:
       ξ_i = C_i / C_{i+1}
     boruvka : theory lower bound  ξ ≥ 2     (each round halves components)
     BMS     : theory per super-step  ξ = 2^t
-    ξ_μ = geometric mean over all steps — reported in Table 1.
+
+    The final step is EXCLUDED from every reported ξ statistic. It always
+    ends at C = 1, so it is truncated rather than a full step, and including
+    it makes the product of all ξ_i telescope to C_0 / 1 = n: the geometric
+    mean over k steps would then be exactly n^(1/k) whatever the shrinkage
+    pattern was, i.e. a step count in disguise. Reported instead:
+
+      steps         actual steps vs. theory P = ⌈log₂ n / t⌉ (bms)
+      ξ_full        geometric mean of ξ over the non-final steps,
+                    compared against 2^t (bms)
+      min ξ_full    smallest non-final ξ — the direct test of ξ ≥ 2 (boruvka)
+
+    A run with a single step has no full step; ξ_full is then N/A.
+    xi_geomean (all steps, = n^(1/k)) stays in bench_xi.csv for reference only.
 
   t̂ (t_hat) — normalised throughput
     t̂ = θ₀(n, m) / T_mean   [theoretical ops per millisecond]
@@ -324,6 +337,51 @@ def steps_of(r):
     return "" if v is None else v
 
 
+def xi_full(r):
+    """ξ values of the non-final steps/rounds (the final one is truncated)."""
+    seq = r.get("xi_per_step") or r.get("xi_per_round") or []
+    return list(seq[:-1])
+
+
+def geomean(xs):
+    xs = [x for x in xs if x > 0]
+    return math.exp(sum(math.log(x) for x in xs) / len(xs)) if xs else None
+
+
+def fmt_range(vals, fmt="{}"):
+    """'3' if all equal, '2–3' otherwise, '' if empty."""
+    vals = [v for v in vals if v is not None and v != ""]
+    if not vals:
+        return ""
+    lo, hi = min(vals), max(vals)
+    return fmt.format(lo) if lo == hi else f"{fmt.format(lo)}–{fmt.format(hi)}"
+
+
+def xi_summary(xi_rows, tag, algo):
+    """
+    Aggregate one (case, algorithm) over instances and repeats:
+      steps     range of actual step/round counts
+      P         theory step count (bms only)
+      full_gm   mean over instances of the geometric mean of non-final ξ
+      full_min  smallest non-final ξ seen in any instance
+      theory    ξ_theory (2^t for bms, 2 for boruvka)
+      t         the bms t parameter
+    """
+    rs = [r for r in xi_rows if r["tag"] == tag and r["algo"] == algo]
+    if not rs:
+        return None
+    gms  = [g for g in (geomean(xi_full(r)) for r in rs) if g is not None]
+    mins = [min(xi_full(r)) for r in rs if xi_full(r)]
+    return {
+        "steps":    fmt_range([steps_of(r) for r in rs]),
+        "P":        fmt_range([r.get("P") for r in rs]),
+        "full_gm":  statistics.mean(gms) if gms else None,
+        "full_min": min(mins) if mins else None,
+        "theory":   rs[0].get("xi_theory"),
+        "t":        rs[0].get("t", ""),
+    }
+
+
 def is_sparse(tag):
     return tag in SPARSE_SERIES
 
@@ -601,10 +659,12 @@ def collect_xi(cases, n_repeats=3):
     Run bms_xi and boruvka_xi, parse JSON from stderr.
     Returns list of row dicts.
 
-    ξ_μ  (subscript μ) = geometric mean over all steps/rounds.
+    xi_geomean is the binaries' own geometric mean over ALL steps, which is
+    n^(1/steps) by construction; the report uses non-final steps instead
+    (see the module docstring).
     (Note: do NOT use subscript t — 't' is the algorithm parameter.)
     """
-    log("Collecting ξ_μ (shrinkage factor, geometric mean) …")
+    log("Collecting ξ (shrinkage factor per step) …")
     rows = []
     bms_bin = str(BIN_DIR / "bms_xi")
     bor_bin = str(BIN_DIR / "boruvka_xi")
@@ -678,17 +738,15 @@ def collect_xi(cases, n_repeats=3):
             subset = [r for r in rows if r["tag"] == tag and r["algo"] == algo]
             if not subset:
                 continue
-            xi_vals = [r["xi_geomean"] for r in subset if r.get("xi_geomean")]
-            if not xi_vals:
-                continue
-            xi_gm = statistics.mean(xi_vals)
-            xi_th = subset[0].get("xi_theory", "?")
+            sm = xi_summary(rows, tag, algo)
+            gm = f"{sm['full_gm']:.2f}" if sm["full_gm"] is not None else "N/A"
+            mn = f"{sm['full_min']:.2f}" if sm["full_min"] is not None else "N/A"
             if algo == "bms":
-                extra = (f"  steps={subset[0].get('steps_actual', '?')}"
-                         f"  t={subset[0].get('t', '?')}")
+                extra = f"  steps={sm['steps']} (P={sm['P']})  t={sm['t']}"
             else:
-                extra = f"  rounds={subset[0].get('rounds', '?')}"
-            log(f"    {algo:8s}  ξ_μ={xi_gm:.2f}  ξ_theory={xi_th}{extra}")
+                extra = f"  rounds={sm['steps']}"
+            log(f"    {algo:8s}  ξ_full={gm}  min ξ_full={mn}  "
+                f"ξ_theory={sm['theory']}{extra}")
     return rows
 
 
@@ -744,18 +802,24 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
         w = csv.writer(f)
         w.writerow([
             "tag", "n", "m", "algo", "seed", "rep",
-            "xi_geomean", "xi_theory",
-            "steps_or_rounds", "t", "xi_sequence",
+            "xi_full_geomean", "xi_full_min", "xi_theory",
+            "steps_or_rounds", "steps_theory_P", "t",
+            "xi_geomean_all_steps", "xi_sequence",
         ])
         for r in xi_rows:
             steps = steps_of(r)
             t_val = r.get("t", "")
             seq   = r.get("xi_per_step") or r.get("xi_per_round", [])
+            full  = xi_full(r)
+            gm    = geomean(full)
             w.writerow([
                 r["tag"], r["n"], r["m"], r["algo"], r.get("seed", ""), r["rep"],
-                f"{r['xi_geomean']:.4f}" if r.get("xi_geomean") else "",
+                f"{gm:.4f}" if gm is not None else "",
+                f"{min(full):.4f}" if full else "",
                 f"{r['xi_theory']:.2f}"  if r.get("xi_theory")  else "",
-                steps, t_val,
+                steps, r.get("P", ""), t_val,
+                # = n^(1/steps) by construction; kept for reference only
+                f"{r['xi_geomean']:.4f}" if r.get("xi_geomean") else "",
                 json.dumps([round(x, 4) for x in seq]),
             ])
     log(f"Xi CSV        → {xi_csv}")
@@ -768,15 +832,21 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
     A(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
 
     A("## Metric Definitions\n")
-    A("### ξ_μ — Component Shrinkage Factor (geometric mean)\n")
+    A("### ξ — Component Shrinkage Factor\n")
     A("```")
     A("ξ_i = C_i / C_{i+1}  (ratio of component counts before/after step i)")
     A("")
     A("boruvka  per round:      theory lower bound  ξ ≥ 2")
     A("BMS      per super-step: theory value        ξ = 2^t")
     A("")
-    A("ξ_μ = geometric mean over all steps (subscript μ = mean)")
-    A("Note: subscript t is NOT used — 't' denotes the algorithm parameter.")
+    A("The final step is excluded: it always ends at C = 1, so it is truncated,")
+    A("and including it makes ∏ξ_i = n, i.e. the geometric mean over k steps")
+    A("is exactly n^(1/k) regardless of the shrinkage pattern.")
+    A("")
+    A("Steps        actual vs. theory P = ⌈log₂ n / t⌉ (bms)")
+    A("ξ_full       geometric mean of the non-final ξ_i, vs. ξ_theory")
+    A("min ξ_full   smallest non-final ξ_i (the ξ ≥ 2 test for boruvka)")
+    A("N/A          only one step, so no full step to measure")
     A("```\n")
 
     A("### t̂ — Normalised Throughput (ops/ms)\n")
@@ -813,31 +883,28 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
     A("Defaults: min_trials = 3, max_trials = 60")
     A("```\n")
 
-    A("## ξ_μ Results (Shrinkage Factor)\n")
-    A("| Size | n | m | algo | ξ_μ (measured) | ξ_theory | Steps/Rounds | t |")
-    A("|------|---|---|------|----------------|---------|-------------|---|")
-    xi_agg = defaultdict(list)
-    for r in xi_rows:
-        xi_agg[(r["tag"], r["algo"])].append(r.get("xi_geomean") or 0)
+    A("## ξ Results (Shrinkage Factor)\n")
+    A("*Ranges (e.g. 2–3) mean the value differed between graph instances. "
+      "ξ_full is averaged over instances; min ξ_full is the smallest seen.*\n")
+    A("| Size | n | m | algo | Steps | Steps (theory P) | ξ_full | min ξ_full | ξ_theory | t |")
+    A("|------|---|---|------|-------|------------------|--------|------------|----------|---|")
+
+    def _f(x):
+        return f"{x:.2f}" if isinstance(x, (int, float)) else "N/A"
 
     for tag, n, m, _ in cases:
         if not data_path(tag).exists():
             continue
         for algo in ["bms", "boruvka"]:
-            vals = xi_agg.get((tag, algo), [])
-            if not vals:
+            sm = xi_summary(xi_rows, tag, algo)
+            if sm is None:
                 continue
-            xi_gm = statistics.mean(vals)
-            sample = next(
-                (r for r in xi_rows if r["tag"] == tag and r["algo"] == algo), {}
-            )
-            xi_th  = sample.get("xi_theory", "")
-            steps  = steps_of(sample)
-            t_v    = sample.get("t", "")
-            xi_th_s = f"{xi_th:.1f}" if isinstance(xi_th, (int, float)) else str(xi_th)
-            A(f"| {tag} | {n:,} | {m:,} | {algo} | **{xi_gm:.2f}** "
-              f"| {xi_th_s} | {steps} | {t_v} |")
-        A("| | | | | | | | |")
+            th = sm["theory"]
+            th_s = f"{th:.1f}" if isinstance(th, (int, float)) else str(th or "")
+            A(f"| {tag} | {n:,} | {m:,} | {algo} | {sm['steps']} "
+              f"| {sm['P'] or '—'} | **{_f(sm['full_gm'])}** "
+              f"| {_f(sm['full_min'])} | {th_s} | {sm['t']} |")
+        A("| | | | | | | | | | |")
 
     A("\n## t̂ and Timing Results\n")
     A("*Mean (ms) is MST construction only, measured inside each binary with "
@@ -883,32 +950,28 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
 
     # Convergence table (sparse series only)
     A("\n## Convergence Analysis (Sparse graphs, m ≈ 5n)\n")
-    A("ξ_μ stabilising → shrinkage rate matches theory. "
-      "t̂ stabilising → complexity bound is tight.\n")
-    A("| n | ξ_μ (bms) | ξ_theory (2^t) | ξ_μ (boruvka) | t̂_bms | t̂_boruvka |")
-    A("|---|-----------|---------------|--------------|-------|----------|")
+    A("t̂ stabilising → complexity bound is tight. ξ_full (non-final steps "
+      "only) is compared against 2^t for bms; min ξ_full ≥ 2 is the Borůvka "
+      "bound.\n")
+    A("| n | steps bms (P) | ξ_full (bms) | 2^t | min ξ_full (boruvka) | t̂_bms | t̂_boruvka |")
+    A("|---|---------------|--------------|-----|----------------------|-------|----------|")
     for tag, n, m, _ in cases:
         if not is_sparse(tag):
             continue
         if not data_path(tag).exists():
             continue
-        bms_xi_vals = xi_agg.get((tag, "bms"),     [])
-        bor_xi_vals = xi_agg.get((tag, "boruvka"), [])
-        bms_t_vals  = primary_times(timing_results.get((tag, "bms"),     {}))
-        bor_t_vals  = primary_times(timing_results.get((tag, "boruvka"), {}))
-        if not bms_xi_vals or not bor_xi_vals:
+        sb = xi_summary(xi_rows, tag, "bms")
+        so = xi_summary(xi_rows, tag, "boruvka")
+        if sb is None or so is None:
             continue
-        xi_bms = statistics.mean(bms_xi_vals)
-        xi_bor = statistics.mean(bor_xi_vals)
-        sample = next(
-            (r for r in xi_rows if r["tag"] == tag and r["algo"] == "bms"), {}
-        )
-        xi_th   = sample.get("xi_theory", "?")
-        xi_th_s = f"{xi_th:.1f}" if isinstance(xi_th, (int, float)) else str(xi_th)
-        th_bms  = t_hat(statistics.mean(bms_t_vals), n, m, "bms")     if bms_t_vals else 0
-        th_bor  = t_hat(statistics.mean(bor_t_vals), n, m, "boruvka") if bor_t_vals else 0
-        A(f"| {n:,} | {xi_bms:.2f} | {xi_th_s} | {xi_bor:.2f} "
-          f"| {th_bms:.0f} | {th_bor:.0f} |")
+        bms_t_vals = primary_times(timing_results.get((tag, "bms"),     {}))
+        bor_t_vals = primary_times(timing_results.get((tag, "boruvka"), {}))
+        th_bms = t_hat(statistics.mean(bms_t_vals), n, m, "bms")     if bms_t_vals else 0
+        th_bor = t_hat(statistics.mean(bor_t_vals), n, m, "boruvka") if bor_t_vals else 0
+        th = sb["theory"]
+        th_s = f"{th:.1f}" if isinstance(th, (int, float)) else str(th or "")
+        A(f"| {n:,} | {sb['steps']} ({sb['P']}) | {_f(sb['full_gm'])} | {th_s} "
+          f"| {_f(so['full_min'])} | {th_bms:.0f} | {th_bor:.0f} |")
 
     md_path = out_dir / "bench_report.md"
     with open(md_path, "w") as f:
@@ -980,7 +1043,7 @@ if __name__ == "__main__":
     bins = make_timing_bins(par_threads, include_par=not args.no_par)
 
     log("=" * 64)
-    log("MST Benchmark  ─  ξ_μ (shrinkage)  +  t̂ (normalised throughput)")
+    log("MST Benchmark  ─  ξ (shrinkage)  +  t̂ (normalised throughput)")
     log(f"  Sizes   : {[c[0] for c in cases]}")
     log(f"  Algos   : {[l for l, _, _ in bins]}")
     log(f"  Seeds   : {SEEDS}")
