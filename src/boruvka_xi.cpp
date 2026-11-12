@@ -34,16 +34,20 @@ int main(){
         }
         for(int r=0;r<n;r++){int idx=best[r];if(idx<0)continue;
             if(dsu.unite(E[idx].u,E[idx].v)){total+=E[idx].w;prog=true;mst_cnt++;
-                if(mst_cnt==n-1)goto done;}}
-        if(mst_cnt==n-1)break;
+                // Stop scanning once the tree is complete, but only the scan:
+                // leaving the round here (it used to be `goto done`) skipped
+                // the recording below, so the final — often largest —
+                // shrinkage never entered the trace. ξ_μ was then a geometric
+                // mean over an unfinished run, and `rounds` was one short.
+                if(mst_cnt==n-1)break;}}
         int C_after=dsu.comps;
         double xi_i=(C_after>0&&C_before>C_after)?(double)C_before/C_after:1.0;
         xi_rounds.push_back(xi_i);
         fprintf(stderr,"{\"type\":\"round\",\"round\":%d,\"C_before\":%d,\"C_after\":%d,\"xi\":%.4f}\n",
                 round,C_before,C_after,xi_i);
         round++;
+        if(mst_cnt==n-1)break;
     }
-    done:
     double log_sum=0;int cnt=0;
     for(double x:xi_rounds){if(x>1.0){log_sum+=log(x);cnt++;}}
     double xi_gm=cnt>0?exp(log_sum/cnt):1.0;

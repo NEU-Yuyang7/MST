@@ -1,2 +1,25 @@
-
 .idea/
+.DS_Store
+
+# Compiled benchmark binaries (run_bench.py --build drops these into src/)
+src/boruvka
+src/boruvka_xi
+src/bms
+src/bms_xi
+src/kruskal
+src/filter_kruskal
+src/parallel_boruvka
+src/gen
+
+# Generated graphs (~600 MB) and benchmark output
+src/data/
+src/results/
+
+# Slurm job logs
+logs/
+
+# LaTeX build products
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.toc

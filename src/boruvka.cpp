@@ -1,4 +1,5 @@
 #include <bits/stdc++.h>
+#include "bench_harness.h"
 #define LL long long
 
 using namespace std;
@@ -103,7 +104,9 @@ pair<LL, vector<Edge>> boruvkaMST(int n, const vector<Edge>& edges) {
     return {total, mst};
 }
 
-int main() {
+int main(int argc, char** argv) {
+    bench::init(argc, argv);
+
     int n, m;
     cin >> n >> m;
     vector<Edge> edges;
@@ -117,12 +120,23 @@ int main() {
         edges.push_back({u, v, w});
     }
 
-    auto [total, mst] = boruvkaMST(n, edges);
+    // boruvkaMST takes edges by const reference, so repeats need no copy.
+    LL total = 0;
+    vector<Edge> mst;
+    for (int r = 0; r < bench::repeats(); r++) {
+        double t0 = bench::now_ms();
+        auto res = boruvkaMST(n, edges);
+        bench::report_time(bench::now_ms() - t0);
+        total = res.first;
+        mst   = std::move(res.second);
+    }
 
     cout << "Total weight = " << total << "\n";
-    cout << "Edges in MST/MSF (" << mst.size() << "):\n";
-    for (auto &e : mst) {
-        cout << e.u << " " << e.v << " " << e.w << "\n";
+    if (bench::print_edges()) {
+        cout << "Edges in MST/MSF (" << mst.size() << "):\n";
+        for (auto &e : mst) {
+            cout << e.u << " " << e.v << " " << e.w << "\n";
+        }
     }
     return 0;
 }
