@@ -33,7 +33,7 @@ g++ -O2 -std=c++17 kruskal.cpp          -o kruskal
 g++ -O2 -std=c++17 filter_kruskal.cpp   -o filter_kruskal
 g++ -O2 -std=c++17 BMSBoruvka.cpp       -o bms
 g++ -O2 -std=c++17 -fopenmp parallel_boruvka.cpp -o parallel_boruvka
-g++ -O2 -std=c++17 bms_instrumented.cpp -o bms_xi
+g++ -O2 -std=c++17 -DBMS_XI BMSBoruvka.cpp -o bms_xi
 g++ -O2 -std=c++17 boruvka_xi.cpp       -o boruvka_xi
 g++ -O2            gen.cpp              -o gen
 ```
@@ -46,16 +46,41 @@ python3 run_bench.py --gen
 
 Default test cases (defined in `TEST_CASES`):
 
-| Tag          | n         | m         | Notes                          |
-| ------------ | --------- | --------- | ------------------------------ |
-| `10k`        | 10,000    | 50,000    | sparse, m ≈ 5n                 |
-| `100k`       | 100,000   | 500,000   | sparse                         |
-| `500k`       | 500,000   | 2,500,000 | sparse                         |
-| `1m`         | 1,000,000 | 5,000,000 | sparse, main experiment        |
-| `dense_50k`  | 50,000    | 2,500,000 | dense, m ≈ 50n                 |
-| `dense_100k` | 100,000   | 5,000,000 | dense                          |
-| `1m_ties`    | 1,000,000 | 5,000,000 | uniform weights (many ties)    |
-| `1m_small`   | 1,000,000 | 5,000,000 | small integer weights [1, 100] |
+Density is set by mean degree `d̄ = 2m/n`, at `2 ln n`, `√n/2` and `2√n`.
+
+The two reference points have different standing. `ln n` is a theorem — the
+Erdős–Rényi sharp threshold, below which a uniform random graph is a.a.s.
+disconnected — and it is also roughly where Fredman–Tarjan's `O(m·β(m,n))`
+gives `O(m)`, since `β` collapses to 1 once `m/n ≥ log n`. `√n` is a reasoned
+choice rather than a convention: there is no standard boundary there. The
+standard notions are coarser (sparse `m = O(n polylog n)`, dense `m = Θ(n²)`
+or `Ω(n^(1+ε))`), and the real line behind them is polylogarithmic versus
+polynomial growth in `d̄`. `√n` is one representative of the polynomial side,
+chosen because `m = Θ(n^1.5)` is the geometric mean of `n` and `n²` and is
+still reachable at these sizes.
+
+| Tag            | n         | m          | `d̄`  | Notes                          |
+| -------------- | --------- | ---------- | ----: | ------------------------------ |
+| `logn_10k`     | 10,000    | 92,103     |  18.4 | d̄ = 2 ln n                     |
+| `logn_30k`     | 30,000    | 309,268    |  20.6 | d̄ = 2 ln n                     |
+| `logn_100k`    | 100,000   | 1,151,292  |  23.0 | d̄ = 2 ln n                     |
+| `logn_300k`    | 300,000   | 3,783,461  |  25.2 | d̄ = 2 ln n                     |
+| `logn_1m`      | 1,000,000 | 13,815,510 |  27.6 | d̄ = 2 ln n, convergence series |
+| `rootlo_30k`   | 30,000    | 1,299,038  |  86.6 | d̄ = √n/2                       |
+| `roothi_30k`   | 30,000    | 5,196,152  | 346.4 | d̄ = 2√n, dense                 |
+| `rootlo_100k`  | 100,000   | 7,905,694  | 158.1 | d̄ = √n/2                       |
+| `roothi_100k`  | 100,000   | 31,622,776 | 632.5 | d̄ = 2√n, dense                 |
+| `1m`           | 1,000,000 | 5,000,000  |  10.0 | weight-distribution control    |
+| `1m_ties`      | 1,000,000 | 5,000,000  |  10.0 | uniform weights (many ties)    |
+| `1m_small`     | 1,000,000 | 5,000,000  |  10.0 | small integer weights [1, 100] |
+
+The `logn_*` series is the n-scaling series: one density regime, so t̂ across
+those rows varies with `n` alone. The `rootlo_*`/`roothi_*` pairs give a
+density sweep at fixed `n`, with the matching `logn_*` case as the third point.
+
+The last three sit at `d̄ = 10`, below `ln(10⁶) = 13.8`, and so are the only
+cases generated with `gen --connected`. They keep that density because the
+weight-distribution results are measured against `1m` as the control.
 
 ### 3. Run benchmark
 
@@ -64,7 +89,7 @@ Default test cases (defined in `TEST_CASES`):
 python3 run_bench.py --build --gen --target-sec 60 --output-dir results/
 
 # Specific sizes only
-python3 run_bench.py --sizes 100k,1m
+python3 run_bench.py --sizes logn_100k,logn_1m
 
 # ξ data only (no multi-trial timing)
 python3 run_bench.py --xi-only
@@ -88,13 +113,46 @@ python3 run_bench.py --sizes roadnet_ca
 
 ---
 
+---
+
+## How timing works
+
+Each binary times its own MST computation with `std::chrono::steady_clock` —
+after parsing the input, before printing the result — and reports it on stderr
+as `{"type":"timing","ms":...}`. `run_bench.py` reads that number. **Reported
+times are MST construction only**; reading the graph file and writing the MST
+out are not included.
+
+The shared support lives in `src/bench_harness.h` and gives every timing binary
+two flags:
+
+| Flag | Effect |
+| --- | --- |
+| `--quiet` | Print `Total weight = ...` but skip the per-edge MST dump. |
+| `--repeat K` | Run the MST computation K times on one parse, reporting each timing separately. The first is a warm-up and is discarded by the driver. |
+
+`run_bench.py` passes both automatically. `--repeat` exists because parsing the
+1m graph costs ~17.5 s against an algorithm time of ~0.7 s, so paying the parse
+per trial limited that case to 3 trials; amortising it over in-process repeats
+lifted the 100k case from 4 trials to 60.
+
+This replaced an earlier harness that timed whole processes, which meant ~92–99%
+of every measurement was text I/O. See `cluster/FINDINGS-io.md` — the published
+results in `analysis/` predate the fix and need regenerating.
+
+Note the trial count is `floor((target_sec/k − parse) / algo)`, so
+`--target-sec` has to exceed the parse cost to buy any trials at all. Use
+`--target-sec 300` or more for the 1m sizes.
+
+---
+
 ## Output Files
 
 All written to `--output-dir` (default `./results/`):
 
 | File               | Contents                                                     |
 | ------------------ | ------------------------------------------------------------ |
-| `bench_timing.csv` | Per-(size, algorithm): mean\_ms, min, max, σ, t̂, vs\_boruvka ratio, vs\_bms ratio |
+| `bench_timing.csv` | Per-(size, algorithm): mean\_ms (MST construction only), min, max, σ, parse\_ms, wall\_total\_ms, t̂, vs\_boruvka ratio, vs\_bms ratio |
 | `bench_xi.csv`     | Per-(size, algorithm, repeat): ξ\_μ, ξ\_theory, steps/rounds, per-step ξ sequence |
 | `bench_report.md`  | Human-readable Markdown report with ξ table, timing table, and convergence analysis |
 
@@ -103,8 +161,8 @@ All written to `--output-dir` (default `./results/`):
 ```
 project/
 |-- src/
+|   |-- bench_harness.h          # Shared timing support (--quiet, --repeat)
 |   |-- BMSBoruvka.cpp           # BMSBoruvka
-|   |-- bms_instrumented.cpp     # BMS + ξ collection
 |   |-- boruvka.cpp              # Borůvka
 |   |-- boruvka_xi.cpp           # Borůvka + ξ collection
 |   |-- filter_kruskal.cpp       # Filter-Kruskal (recursive pivot-based)
@@ -117,5 +175,14 @@ project/
 |-- BMSSP/
 |   |-- BMSSP.cpp                # reproduce BMSSP(learning purposes)
 |
+|-- cluster/
+|   |-- run_bench.sbatch         # Slurm job script
+|   |-- README.md                # Running the benchmarks on a cluster
+|   |-- FINDINGS-io.md           # Why the published timings need regenerating
+|
 |-- README.md
 ```
+
+## Paper
+
+The `paper` directory now holds the files for building the paper, as well as the original `.docx` version.

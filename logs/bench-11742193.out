@@ -1,0 +1,191 @@
+=== Job 11742193 on c3008 ===
+Started: Sun Nov  8 09:16:49 PM EST 2026
+--- Toolchain ---
+g++ (GCC) 11.5.0 20240719 (Red Hat 11.5.0-11)
+Python 3.9.18
+Toolchain OK
+--- Working in /home/rhillyard/projects/boruvka/src ---
+vast1-mghpcc-eth.neu.edu:/discovery/home  255T  152T  104T  60% /home
+[21:16:53] INFO   ================================================================
+[21:16:53] INFO   MST Benchmark  ─  ξ_μ (shrinkage)  +  t̂ (normalised throughput)
+[21:16:53] INFO     Sizes   : ['10k', '100k', '500k', '1m', 'dense_50k', 'dense_100k', '1m_ties', '1m_small']
+[21:16:53] INFO     Algos   : ['boruvka', 'kruskal', 'filter_kruskal', 'bms', 'par_T2', 'par_T4']
+[21:16:53] INFO     Target  : 300.0s / size  trials=[3, 60]
+[21:16:53] INFO   ================================================================
+[21:16:53] INFO   Compiling binaries …
+[21:16:53] INFO     boruvka
+[21:16:56] INFO     parallel_boruvka
+[21:17:00] INFO     bms
+[21:17:03] INFO     kruskal
+[21:17:06] INFO     filter_kruskal
+[21:17:09] INFO     bms_xi
+[21:17:13] INFO     boruvka_xi
+[21:17:16] INFO     gen
+[21:17:19] INFO   Build complete.
+[21:17:19] INFO     test_10k.txt already exists, skipping
+[21:17:19] INFO     test_100k.txt already exists, skipping
+[21:17:19] INFO     test_500k.txt already exists, skipping
+[21:17:19] INFO     test_1m.txt already exists, skipping
+[21:17:19] INFO     test_dense_50k.txt already exists, skipping
+[21:17:19] INFO     test_dense_100k.txt already exists, skipping
+[21:17:19] INFO     test_1m_ties.txt already exists, skipping
+[21:17:19] INFO     test_1m_small.txt already exists, skipping
+[21:17:19] INFO   Data generation complete.
+[21:17:19] INFO   Correctness check …
+[21:17:20] INFO     OK   10k              weight = 1209420330843
+[21:17:21] INFO     OK   100k             weight = 11888591699096
+[21:17:28] INFO     OK   500k             weight = 59009219873895
+[21:17:41] INFO     OK   1m               weight = 118260276147965
+[21:17:47] INFO     OK   dense_50k        weight = 597483828696
+[21:17:59] INFO     OK   dense_100k       weight = 1208625990000
+[21:18:13] INFO     OK   1m_ties          weight = 999999
+[21:18:26] INFO     OK   1m_small         weight = 12323905
+[21:18:26] INFO   All algorithms agree.
+[21:18:26] INFO   Collecting ξ_μ (shrinkage factor, geometric mean) …
+[21:18:26] INFO     10k  (n=10,000)
+[21:18:26] INFO       bms       ξ_μ=40.82  ξ_theory=64.0  steps=2  t=6
+[21:18:26] INFO       boruvka   ξ_μ=5.07  ξ_theory=2.0  rounds=5
+[21:18:26] INFO     100k  (n=100,000)
+[21:18:28] INFO       bms       ξ_μ=45.64  ξ_theory=128.0  steps=2  t=7
+[21:18:28] INFO       boruvka   ξ_μ=5.67  ξ_theory=2.0  rounds=6
+[21:18:28] INFO     500k  (n=500,000)
+[21:18:35] INFO       bms       ξ_μ=44.19  ξ_theory=256.0  steps=2  t=8
+[21:18:35] INFO       boruvka   ξ_μ=5.35  ξ_theory=2.0  rounds=7
+[21:18:35] INFO     1m  (n=1,000,000)
+[21:18:49] INFO       bms       ξ_μ=42.84  ξ_theory=256.0  steps=2  t=8
+[21:18:49] INFO       boruvka   ξ_μ=5.90  ξ_theory=2.0  rounds=7
+[21:18:49] INFO     dense_50k  (n=50,000)
+[21:18:54] INFO       bms       ξ_μ=1.00  ξ_theory=128.0  steps=0  t=7
+[21:18:54] INFO       boruvka   ξ_μ=5.41  ξ_theory=2.0  rounds=6
+[21:18:55] INFO     dense_100k  (n=100,000)
+[21:19:05] INFO       bms       ξ_μ=1.00  ξ_theory=128.0  steps=0  t=7
+[21:19:05] INFO       boruvka   ξ_μ=5.21  ξ_theory=2.0  rounds=6
+[21:19:05] INFO     1m_ties  (n=1,000,000)
+[21:19:19] INFO       bms       ξ_μ=42.41  ξ_theory=256.0  steps=2  t=8
+[21:19:19] INFO       boruvka   ξ_μ=5.90  ξ_theory=2.0  rounds=7
+[21:19:19] INFO     1m_small  (n=1,000,000)
+[21:19:32] INFO       bms       ξ_μ=42.07  ξ_theory=256.0  steps=2  t=8
+[21:19:32] INFO       boruvka   ξ_μ=6.15  ξ_theory=2.0  rounds=7
+[21:19:32] INFO   Probe runs (warm-up + one timed run each) …
+[21:19:33] INFO     10k              boruvka     wall=19 ms  algo=3.91 ms
+[21:19:33] INFO     10k              kruskal     wall=19 ms  algo=3.57 ms
+[21:19:33] INFO     10k              filter_kruskal  wall=18 ms  algo=2.53 ms
+[21:19:34] INFO     10k              bms         wall=18 ms  algo=3.39 ms
+[21:19:34] INFO     10k              par_T2      wall=24 ms  algo=9.33 ms
+[21:19:35] INFO     10k              par_T4      wall=23 ms  algo=6.59 ms
+[21:19:35] INFO     100k             boruvka     wall=182 ms  algo=62.09 ms
+[21:19:36] INFO     100k             kruskal     wall=164 ms  algo=41.92 ms
+[21:19:36] INFO     100k             filter_kruskal  wall=153 ms  algo=29.31 ms
+[21:19:37] INFO     100k             bms         wall=164 ms  algo=40.32 ms
+[21:19:38] INFO     100k             par_T2      wall=198 ms  algo=81.07 ms
+[21:19:39] INFO     100k             par_T4      wall=175 ms  algo=58.44 ms
+[21:19:41] INFO     500k             boruvka     wall=1048 ms  algo=453.22 ms
+[21:19:43] INFO     500k             kruskal     wall=863 ms  algo=241.67 ms
+[21:19:45] INFO     500k             filter_kruskal  wall=791 ms  algo=167.19 ms
+[21:19:47] INFO     500k             bms         wall=941 ms  algo=328.85 ms
+[21:19:49] INFO     500k             par_T2      wall=1088 ms  algo=496.91 ms
+[21:19:51] INFO     500k             par_T4      wall=951 ms  algo=359.67 ms
+[21:19:56] INFO     1m               boruvka     wall=2090 ms  algo=899.04 ms
+[21:20:00] INFO     1m               kruskal     wall=1728 ms  algo=491.37 ms
+[21:20:03] INFO     1m               filter_kruskal  wall=1571 ms  algo=334.67 ms
+[21:20:08] INFO     1m               bms         wall=1892 ms  algo=675.67 ms
+[21:20:12] INFO     1m               par_T2      wall=2159 ms  algo=991.29 ms
+[21:20:17] INFO     1m               par_T4      wall=1912 ms  algo=740.06 ms
+[21:20:19] INFO     dense_50k        boruvka     wall=776 ms  algo=203.34 ms
+[21:20:21] INFO     dense_50k        kruskal     wall=802 ms  algo=206.14 ms
+[21:20:22] INFO     dense_50k        filter_kruskal  wall=668 ms  algo=65.56 ms
+[21:20:24] INFO     dense_50k        bms         wall=751 ms  algo=165.69 ms
+[21:20:26] INFO     dense_50k        par_T2      wall=883 ms  algo=318.77 ms
+[21:20:28] INFO     dense_50k        par_T4      wall=758 ms  algo=189.34 ms
+[21:20:32] INFO     dense_100k       boruvka     wall=1648 ms  algo=507.82 ms
+[21:20:35] INFO     dense_100k       kruskal     wall=1630 ms  algo=437.00 ms
+[21:20:38] INFO     dense_100k       filter_kruskal  wall=1331 ms  algo=146.36 ms
+[21:20:42] INFO     dense_100k       bms         wall=1541 ms  algo=376.24 ms
+[21:20:46] INFO     dense_100k       par_T2      wall=1788 ms  algo=667.27 ms
+[21:20:49] INFO     dense_100k       par_T4      wall=1522 ms  algo=392.64 ms
+[21:20:54] INFO     1m_ties          boruvka     wall=2097 ms  algo=1094.50 ms
+[21:20:58] INFO     1m_ties          kruskal     wall=2100 ms  algo=1073.09 ms
+[21:21:03] INFO     1m_ties          filter_kruskal  wall=2124 ms  algo=1099.47 ms
+[21:21:07] INFO     1m_ties          bms         wall=1664 ms  algo=644.66 ms
+[21:21:11] INFO     1m_ties          par_T2      wall=1925 ms  algo=940.35 ms
+[21:21:15] INFO     1m_ties          par_T4      wall=1647 ms  algo=665.38 ms
+[21:21:19] INFO     1m_small         boruvka     wall=1845 ms  algo=815.84 ms
+[21:21:23] INFO     1m_small         kruskal     wall=1961 ms  algo=901.87 ms
+[21:21:26] INFO     1m_small         filter_kruskal  wall=1627 ms  algo=551.76 ms
+[21:21:31] INFO     1m_small         bms         wall=2205 ms  algo=1147.48 ms
+[21:21:35] INFO     1m_small         par_T2      wall=1918 ms  algo=915.78 ms
+[21:21:38] INFO     1m_small         par_T4      wall=1680 ms  algo=684.96 ms
+[21:21:38] INFO     10k              parse≈16 ms  slowest algo=9.33 ms  per-algo budget=50000 ms  → 60 trials
+[21:21:38] INFO     100k             parse≈124 ms  slowest algo=81.07 ms  per-algo budget=50000 ms  → 60 trials
+[21:21:38] INFO     500k             parse≈623 ms  slowest algo=496.91 ms  per-algo budget=50000 ms  → 60 trials
+[21:21:38] INFO     1m               parse≈1237 ms  slowest algo=991.29 ms  per-algo budget=50000 ms  → 49 trials
+[21:21:38] INFO     dense_50k        parse≈603 ms  slowest algo=318.77 ms  per-algo budget=50000 ms  → 60 trials
+[21:21:38] INFO     dense_100k       parse≈1192 ms  slowest algo=667.27 ms  per-algo budget=50000 ms  → 60 trials
+[21:21:38] INFO     1m_ties          parse≈1027 ms  slowest algo=1099.47 ms  per-algo budget=50000 ms  → 44 trials
+[21:21:38] INFO     1m_small         parse≈1076 ms  slowest algo=1147.48 ms  per-algo budget=50000 ms  → 42 trials
+[21:21:38] INFO   
+[21:21:38] INFO   Main timing …
+[21:21:38] INFO   
+[21:21:38] INFO   [1/8] 10k  n=10,000 m=50,000  trials=60
+[21:21:39] INFO       boruvka         3.63 ms  σ= 0.02  t̂= 182998.1 ops/ms  [min=3.61 max=3.77]  (parse 485 ms, once)
+[21:21:40] INFO       kruskal         3.33 ms  σ= 0.03  t̂= 199457.1 ops/ms  [min=3.32 max=3.49]  (parse 439 ms, once)
+[21:21:40] INFO       filter_kruskal      2.10 ms  σ= 0.01  t̂= 317066.4 ops/ms  [min=2.08 max=2.15]  (parse 581 ms, once)
+[21:21:41] INFO       bms             2.82 ms  σ= 0.07  t̂=  19908.1 ops/ms  [min=2.78 max=3.31]  (parse 468 ms, once)
+[21:21:42] INFO       par_T2          8.75 ms  σ= 0.04  t̂=  75931.2 ops/ms  [min=8.69 max=8.93]  (parse 205 ms, once)
+[21:21:42] INFO       par_T4          5.75 ms  σ= 0.06  t̂= 115466.7 ops/ms  [min=5.65 max=5.92]  (parse 259 ms, once)
+[21:21:42] INFO   [2/8] 100k  n=100,000 m=500,000  trials=60
+[21:21:46] INFO       boruvka        58.58 ms  σ= 1.05  t̂= 141774.1 ops/ms  [min=57.53 max=61.52]  (parse 390 ms, once)
+[21:21:49] INFO       kruskal        40.76 ms  σ= 0.17  t̂= 203746.6 ops/ms  [min=40.59 max=41.31]  (parse 511 ms, once)
+[21:21:52] INFO       filter_kruskal     24.61 ms  σ= 0.16  t̂= 337503.4 ops/ms  [min=24.51 max=25.45]  (parse 536 ms, once)
+[21:21:54] INFO       bms            36.82 ms  σ= 0.93  t̂=  17681.0 ops/ms  [min=35.76 max=38.32]  (parse 374 ms, once)
+[21:21:59] INFO       par_T2         74.62 ms  σ= 0.47  t̂= 111292.5 ops/ms  [min=74.10 max=76.43]  (parse 254 ms, once)
+[21:22:02] INFO       par_T4         49.26 ms  σ= 0.41  t̂= 168607.2 ops/ms  [min=48.80 max=50.84]  (parse 355 ms, once)
+[21:22:02] INFO   [3/8] 500k  n=500,000 m=2,500,000  trials=60
+[21:22:31] INFO       boruvka       449.76 ms  σ= 0.81  t̂= 105230.5 ops/ms  [min=449.07 max=454.89]  (parse 810 ms, once)
+[21:22:47] INFO       kruskal       238.92 ms  σ= 0.28  t̂= 198092.6 ops/ms  [min=238.32 max=239.61]  (parse 1630 ms, once)
+[21:22:58] INFO       filter_kruskal    158.44 ms  σ= 0.63  t̂= 298712.5 ops/ms  [min=155.84 max=160.74]  (parse 1835 ms, once)
+[21:23:21] INFO       bms           335.97 ms  σ= 5.05  t̂=  10571.2 ops/ms  [min=297.65 max=337.78]  (parse 1865 ms, once)
+[21:23:50] INFO       par_T2        471.47 ms  σ= 3.26  t̂= 100385.2 ops/ms  [min=464.33 max=477.40]  (parse 936 ms, once)
+[21:24:11] INFO       par_T4        322.61 ms  σ= 2.73  t̂= 146707.8 ops/ms  [min=314.89 max=329.82]  (parse 765 ms, once)
+[21:24:11] INFO   [4/8] 1m  n=1,000,000 m=5,000,000  trials=49
+[21:24:54] INFO       boruvka       834.25 ms  σ=39.11  t̂= 119458.0 ops/ms  [min=802.88 max=902.10]  (parse 1336 ms, once)
+[21:25:21] INFO       kruskal       491.18 ms  σ= 1.02  t̂= 202893.5 ops/ms  [min=489.80 max=494.27]  (parse 2930 ms, once)
+[21:25:45] INFO       filter_kruskal    393.85 ms  σ= 5.48  t̂= 253034.7 ops/ms  [min=391.10 max=421.71]  (parse 3722 ms, once)
+[21:26:15] INFO       bms           528.40 ms  σ= 0.92  t̂=  13912.2 ops/ms  [min=526.09 max=530.66]  (parse 3073 ms, once)
+[21:27:02] INFO       par_T2        931.36 ms  σ=14.39  t̂= 107002.7 ops/ms  [min=920.93 max=993.06]  (parse 1256 ms, once)
+[21:27:39] INFO       par_T4        705.38 ms  σ=10.71  t̂= 141282.7 ops/ms  [min=676.76 max=720.41]  (parse 1465 ms, once)
+[21:27:39] INFO   [5/8] dense_50k  n=50,000 m=2,500,000  trials=60
+[21:27:53] INFO       boruvka       203.73 ms  σ= 0.40  t̂= 191550.6 ops/ms  [min=202.90 max=205.18]  (parse 840 ms, once)
+[21:28:07] INFO       kruskal       206.23 ms  σ= 0.19  t̂= 189224.3 ops/ms  [min=205.90 max=207.07]  (parse 1605 ms, once)
+[21:28:12] INFO       filter_kruskal     61.90 ms  σ= 0.23  t̂= 630408.9 ops/ms  [min=60.24 max=62.26]  (parse 1860 ms, once)
+[21:28:24] INFO       bms           160.96 ms  σ= 0.82  t̂=   1940.2 ops/ms  [min=157.21 max=163.24]  (parse 1690 ms, once)
+[21:28:44] INFO       par_T2        309.95 ms  σ= 1.23  t̂= 125905.0 ops/ms  [min=307.42 max=314.70]  (parse 724 ms, once)
+[21:28:56] INFO       par_T4        181.99 ms  σ= 0.85  t̂= 214428.2 ops/ms  [min=180.38 max=184.16]  (parse 969 ms, once)
+[21:28:56] INFO   [6/8] dense_100k  n=100,000 m=5,000,000  trials=60
+[21:29:27] INFO       boruvka       490.83 ms  σ= 0.47  t̂= 169198.9 ops/ms  [min=490.20 max=492.44]  (parse 1372 ms, once)
+[21:29:57] INFO       kruskal       437.09 ms  σ= 0.47  t̂= 190002.7 ops/ms  [min=436.05 max=438.12]  (parse 3295 ms, once)
+[21:30:12] INFO       filter_kruskal    187.22 ms  σ= 3.36  t̂= 443583.3 ops/ms  [min=184.53 max=208.41]  (parse 3975 ms, once)
+[21:30:38] INFO       bms           373.54 ms  σ= 0.83  t̂=   1742.8 ops/ms  [min=371.95 max=376.38]  (parse 3160 ms, once)
+[21:31:20] INFO       par_T2        651.82 ms  σ= 1.51  t̂= 127410.1 ops/ms  [min=649.42 max=656.90]  (parse 1621 ms, once)
+[21:31:44] INFO       par_T4        382.19 ms  σ= 1.81  t̂= 217292.8 ops/ms  [min=379.62 max=388.99]  (parse 1474 ms, once)
+[21:31:44] INFO   [7/8] 1m_ties  n=1,000,000 m=5,000,000  trials=44
+[21:32:33] INFO       boruvka      1046.57 ms  σ= 7.01  t̂=  95223.0 ops/ms  [min=1042.11 max=1075.43]  (parse 1220 ms, once)
+[21:33:23] INFO       kruskal      1066.99 ms  σ= 0.59  t̂=  93401.0 ops/ms  [min=1065.61 max=1068.08]  (parse 2469 ms, once)
+[21:34:22] INFO       filter_kruskal   1240.85 ms  σ=14.32  t̂=  80314.3 ops/ms  [min=1225.96 max=1293.64]  (parse 3200 ms, once)
+[21:34:52] INFO       bms           587.13 ms  σ= 1.52  t̂=  12520.7 ops/ms  [min=577.79 max=588.26]  (parse 2675 ms, once)
+[21:35:33] INFO       par_T2        897.72 ms  σ=17.49  t̂= 111011.6 ops/ms  [min=889.02 max=1006.81]  (parse 1308 ms, once)
+[21:36:04] INFO       par_T4        653.98 ms  σ= 3.84  t̂= 152387.8 ops/ms  [min=647.61 max=668.09]  (parse 1107 ms, once)
+[21:36:04] INFO   [8/8] 1m_small  n=1,000,000 m=5,000,000  trials=42
+[21:36:39] INFO       boruvka       781.09 ms  σ=14.28  t̂= 127587.8 ops/ms  [min=770.82 max=825.69]  (parse 1156 ms, once)
+[21:37:19] INFO       kruskal       880.06 ms  σ= 0.52  t̂= 113240.4 ops/ms  [min=878.72 max=881.19]  (parse 2451 ms, once)
+[21:37:44] INFO       filter_kruskal    516.39 ms  σ=17.72  t̂= 192989.6 ops/ms  [min=493.39 max=580.96]  (parse 3193 ms, once)
+[21:38:08] INFO       bms           491.76 ms  σ= 0.60  t̂=  14948.8 ops/ms  [min=490.83 max=492.98]  (parse 2519 ms, once)
+[21:38:47] INFO       par_T2        882.00 ms  σ= 6.84  t̂= 112991.2 ops/ms  [min=865.62 max=894.44]  (parse 1295 ms, once)
+[21:39:17] INFO       par_T4        654.88 ms  σ= 5.18  t̂= 152176.5 ops/ms  [min=646.08 max=666.69]  (parse 1342 ms, once)
+[21:39:17] INFO   Timing CSV    → results/job-11742193/bench_timing.csv
+[21:39:17] INFO   Xi CSV        → results/job-11742193/bench_xi.csv
+[21:39:18] INFO   Report        → results/job-11742193/bench_report.md
+[21:39:18] INFO   
+All done.
+Finished: Sun Nov  8 09:39:18 PM EST 2026
+Results in: /home/rhillyard/projects/boruvka/src/results/job-11742193
