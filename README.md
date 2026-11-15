@@ -70,17 +70,24 @@ still reachable at these sizes.
 | `roothi_30k`   | 30,000    | 5,196,152  | 346.4 | d̄ = 2√n, dense                 |
 | `rootlo_100k`  | 100,000   | 7,905,694  | 158.1 | d̄ = √n/2                       |
 | `roothi_100k`  | 100,000   | 31,622,776 | 632.5 | d̄ = 2√n, dense                 |
-| `1m`           | 1,000,000 | 5,000,000  |  10.0 | weight-distribution control    |
-| `1m_ties`      | 1,000,000 | 5,000,000  |  10.0 | uniform weights (many ties)    |
-| `1m_small`     | 1,000,000 | 5,000,000  |  10.0 | small integer weights [1, 100] |
+| `logn_1m_ties` | 1,000,000 | 13,815,510 |  27.6 | d̄ = 2 ln n, uniform weights (many ties); control `logn_1m` |
+| `logn_1m_small`| 1,000,000 | 13,815,510 |  27.6 | d̄ = 2 ln n, small integer weights [1, 100]; control `logn_1m` |
+| `1m`           | 1,000,000 | 5,000,000  |  10.0 | legacy weight-distribution control |
+| `1m_ties`      | 1,000,000 | 5,000,000  |  10.0 | legacy: uniform weights (many ties) |
+| `1m_small`     | 1,000,000 | 5,000,000  |  10.0 | legacy: small integer weights [1, 100] |
 
 The `logn_*` series is the n-scaling series: one density regime, so t̂ across
 those rows varies with `n` alone. The `rootlo_*`/`roothi_*` pairs give a
 density sweep at fixed `n`, with the matching `logn_*` case as the third point.
 
-The last three sit at `d̄ = 10`, below `ln(10⁶) = 13.8`, and so are the only
-cases generated with `gen --connected`. They keep that density because the
-weight-distribution results are measured against `1m` as the control.
+`logn_1m_ties` and `logn_1m_small` are the weight-distribution cases. They
+share `logn_1m`'s density, and `logn_1m` is their random-weight control.
+
+The last three are the legacy weight-distribution cases at `d̄ = 10`, kept only
+for comparison with jobs 11742193 and 11805997. They sit below
+`ln(10⁶) = 13.8` and so are the only cases generated with `gen --connected`;
+that forced path means they are not uniform random graphs. Quote the
+`logn_1m_*` results, not these.
 
 ### 3. Run benchmark
 

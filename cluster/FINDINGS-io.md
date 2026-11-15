@@ -98,6 +98,13 @@ asymptotic advantage is visible in the scaling even where the ratio wobbles.
 
 ### The result the paper should be built around
 
+> **Update:** the cases below are the legacy m = 5n graphs (d̄ = 10), one seed,
+> generated with a forced Hamiltonian path because they sit below the
+> connectivity threshold. The weight-distribution cases have since been moved
+> to d̄ = 2 ln n as `logn_1m_ties` and `logn_1m_small`, with `logn_1m` as the
+> control, and need re-measuring with `--n-seeds 3` before any figure here is
+> quoted. The legacy cases stay in the suite for comparability only.
+
 `bms` is **not** the fastest algorithm overall — Filter-Kruskal is, on most
 graphs. But look at *where* `bms` beats it:
 

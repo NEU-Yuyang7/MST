@@ -157,7 +157,7 @@ cluster requires one.
 
 ## Disk space
 
-`--gen` writes about 1.7 GB of graph files into `src/data/`, at roughly 22.6
+`--gen` writes about 2.2 GB of graph files into `src/data/`, at roughly 22.6
 bytes per edge:
 
 | File | m | Approx size |
@@ -171,6 +171,8 @@ bytes per edge:
 | `test_roothi_30k.txt` | 5,196,152 | 117 MB |
 | `test_rootlo_100k.txt` | 7,905,694 | 179 MB |
 | `test_roothi_100k.txt` | 31,622,776 | 715 MB |
+| `test_logn_1m_ties.txt` | 13,815,510 | 218 MB |
+| `test_logn_1m_small.txt` | 13,815,510 | 231 MB |
 | `test_1m.txt` | 5,000,000 | 113 MB |
 | `test_1m_ties.txt` | 5,000,000 | 113 MB |
 | `test_1m_small.txt` | 5,000,000 | 100 MB |
@@ -178,7 +180,7 @@ bytes per edge:
 Generation is skipped for any file that already exists, so re-running the job
 is cheap. If your home quota is tight, clone the repo onto scratch instead.
 
-**`--n-seeds K` multiplies this by K** — 5.2 GB at K=3 — so scope it with
+**`--n-seeds K` multiplies this by K** — 6.6 GB at K=3 — so scope it with
 `--sizes` rather than applying it to the whole suite.
 
 `roothi_100k` is the one to watch: 31.6M edges is ~506 MB for the edge vector,

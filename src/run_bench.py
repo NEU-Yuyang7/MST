@@ -159,9 +159,17 @@ SOURCES = {
 # Group B — density triples at fixed n, spanning ln n → √n → above √n. Group A
 # supplies each triple's lowest-density member, so only two new cases per n.
 #
-# Group C — weight distributions, left at the legacy m = 5n so they stay
-# comparable with jobs 11742193 and 11805997. The 2.11× bms result on 1m_ties
-# is measured against `1m`, which is why that case keeps its old density.
+# Group C — weight distributions at d̄ = 2 ln n, the same density as Group A.
+# `logn_1m` (Group A) is the random-weight control, so only the two skewed
+# distributions are new cases. Generated unforced, so they are true G(n, m)
+# like the control. This is where the weight-distribution result (bms vs
+# Filter-Kruskal on low-entropy weights) is measured.
+#
+# Group D — the legacy weight-distribution cases at m = 5n (d̄ = 10). Kept
+# only for comparability with jobs 11742193 and 11805997, which measured the
+# original 2.11× bms result on 1m_ties against `1m`. They sit below the
+# connectivity threshold and need gen's forced Hamiltonian path, so they are
+# not uniform random graphs; quote Group C, not these.
 TEST_CASES = [
     # Group A — d̄ = 2 ln n
     ("logn_10k",    10_000,      92_103, []),
@@ -174,7 +182,10 @@ TEST_CASES = [
     ("roothi_30k",  30_000,   5_196_152, []),
     ("rootlo_100k", 100_000,  7_905_694, []),
     ("roothi_100k", 100_000, 31_622_776, []),
-    # Group C — weight distributions, legacy density (d̄ = 10)
+    # Group C — weight distributions at d̄ = 2 ln n; control is logn_1m
+    ("logn_1m_ties",  1_000_000, 13_815_510, ["--weights", "uniform"]),
+    ("logn_1m_small", 1_000_000, 13_815_510, ["--weights", "small"]),
+    # Group D — legacy weight distributions at d̄ = 10 (forced connected)
     ("1m",      1_000_000,   5_000_000, []),
     ("1m_ties",  1_000_000,   5_000_000, ["--weights", "uniform"]),
     ("1m_small", 1_000_000,   5_000_000, ["--weights", "small"]),
@@ -195,9 +206,9 @@ SPARSE_SERIES = ("logn_10k", "logn_30k", "logn_100k", "logn_300k", "logn_1m")
 # distribution is roughly 2 + Poisson(d̄-2) rather than Poisson(d̄). That is
 # only acceptable where it is unavoidable.
 #
-# Group C sits at d̄ = 10 against ln(10⁶) = 13.8, where a uniform graph is
+# Group D sits at d̄ = 10 against ln(10⁶) = 13.8, where a uniform graph is
 # a.a.s. disconnected, so the path is doing structural work and must stay.
-# Groups A and B are at or above 2 ln n, where P(disconnected) ≈ n·e^(-d̄)
+# Groups A, B and C are at or above 2 ln n, where P(disconnected) ≈ n·e^(-d̄)
 # = 1/n, so they are generated unforced and are true uniform random graphs.
 # A disconnected draw is not a failure — every algorithm computes the MSF and
 # the weights still agree — it is merely unlikely.
