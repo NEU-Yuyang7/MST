@@ -355,6 +355,25 @@ def xi_full(r):
     return list(seq[:-1])
 
 
+def scan_per_edge(r):
+    """
+    Edge scans per input edge, a machine-independent work measure.
+      bms      t · Σ M_i / m, where M_i is the edge list size entering Phase B
+               of step i. Upper bound: a step's rounds can stop early and
+               each round drops internal edges. Phase A's activation scan
+               (O(m) in total) is not included.
+      boruvka  rounds, since every round scans all m edges.
+    """
+    m = r.get("m") or 0
+    if not m:
+        return None
+    if r["algo"] == "bms":
+        mt, t = r.get("M_trace") or [], r.get("t")
+        return t * sum(mt) / m if mt and t else None
+    rounds = r.get("rounds")
+    return float(rounds) if rounds is not None else None
+
+
 def geomean(xs):
     xs = [x for x in xs if x > 0]
     return math.exp(sum(math.log(x) for x in xs) / len(xs)) if xs else None
@@ -378,12 +397,14 @@ def xi_summary(xi_rows, tag, algo):
       full_min  smallest non-final ξ seen in any instance
       theory    ξ_theory (2^t for bms, 2 for boruvka)
       t         the bms t parameter
+      scan      mean edge scans per input edge (see scan_per_edge)
     """
     rs = [r for r in xi_rows if r["tag"] == tag and r["algo"] == algo]
     if not rs:
         return None
     gms  = [g for g in (geomean(xi_full(r)) for r in rs) if g is not None]
     mins = [min(xi_full(r)) for r in rs if xi_full(r)]
+    work = [w for w in (scan_per_edge(r) for r in rs) if w is not None]
     return {
         "steps":    fmt_range([steps_of(r) for r in rs]),
         "P":        fmt_range([r.get("P") for r in rs]),
@@ -391,6 +412,7 @@ def xi_summary(xi_rows, tag, algo):
         "full_min": min(mins) if mins else None,
         "theory":   rs[0].get("xi_theory"),
         "t":        rs[0].get("t", ""),
+        "scan":     statistics.mean(work) if work else None,
     }
 
 
@@ -407,6 +429,7 @@ def t_hat(mean_ms, n, m, label):
 
     θ₀ definitions (matching the paper):
       boruvka / par_T*:  θ₀ = m · log₂(n)              [O(m log n) bound]
+      kruskal / filter_kruskal / prim: same m · log₂(n), their usual bound
       bms:               θ₀ = m · (log₂ n)^(2/3)        [O(m log^{2/3} n) bound]
 
     Note: the exponent 2/3 is applied to the entire log₂(n), i.e.
@@ -821,6 +844,7 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
             "xi_full_geomean", "xi_full_min", "xi_theory",
             "steps_or_rounds", "steps_theory_P", "t",
             "xi_geomean_all_steps", "xi_sequence",
+            "M_sequence", "scan_per_edge",
         ])
         for r in xi_rows:
             steps = steps_of(r)
@@ -837,6 +861,8 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
                 # = n^(1/steps) by construction; kept for reference only
                 f"{r['xi_geomean']:.4f}" if r.get("xi_geomean") else "",
                 json.dumps([round(x, 4) for x in seq]),
+                json.dumps(r.get("M_trace", [])) if r["algo"] == "bms" else "",
+                f"{scan_per_edge(r):.3f}" if scan_per_edge(r) is not None else "",
             ])
     log(f"Xi CSV        → {xi_csv}")
 
@@ -863,6 +889,8 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
     A("ξ_full       geometric mean of the non-final ξ_i, vs. ξ_theory")
     A("min ξ_full   smallest non-final ξ_i (the ξ ≥ 2 test for boruvka)")
     A("N/A          only one step, so no full step to measure")
+    A("Scans/edge   bms: t · Σ M_i / m  (M_i = edges entering step i; upper bound)")
+    A("             boruvka: rounds     (each round scans all m edges)")
     A("```\n")
 
     A("### t̂ — Normalised Throughput (ops/ms)\n")
@@ -901,9 +929,12 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
 
     A("## ξ Results (Shrinkage Factor)\n")
     A("*Ranges (e.g. 2–3) mean the value differed between graph instances. "
-      "ξ_full is averaged over instances; min ξ_full is the smallest seen.*\n")
-    A("| Size | n | m | algo | Steps | Steps (theory P) | ξ_full | min ξ_full | ξ_theory | t |")
-    A("|------|---|---|------|-------|------------------|--------|------------|----------|---|")
+      "ξ_full is averaged over instances; min ξ_full is the smallest seen. "
+      "Scans/edge is edge work per input edge: t·ΣM_i/m for bms (an upper "
+      "bound; M_i is the edge list entering step i), rounds for boruvka "
+      "(each round scans all m edges). Like ξ it depends only on the graph.*\n")
+    A("| Size | n | m | algo | Steps | Steps (theory P) | ξ_full | min ξ_full | ξ_theory | t | Scans/edge |")
+    A("|------|---|---|------|-------|------------------|--------|------------|----------|---|------------|")
 
     def _f(x):
         return f"{x:.2f}" if isinstance(x, (int, float)) else "N/A"
@@ -919,8 +950,8 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
             th_s = f"{th:.1f}" if isinstance(th, (int, float)) else str(th or "")
             A(f"| {tag} | {n:,} | {m:,} | {algo} | {sm['steps']} "
               f"| {sm['P'] or '—'} | **{_f(sm['full_gm'])}** "
-              f"| {_f(sm['full_min'])} | {th_s} | {sm['t']} |")
-        A("| | | | | | | | | | |")
+              f"| {_f(sm['full_min'])} | {th_s} | {sm['t']} | {_f(sm['scan'])} |")
+        A("| | | | | | | | | | | |")
 
     A("\n## t̂ and Timing Results\n")
     A("*Mean (ms) is MST construction only, measured inside each binary with "
