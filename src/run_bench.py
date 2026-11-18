@@ -106,6 +106,7 @@ SOURCES = {
     "boruvka_xi":     SCRIPT_DIR / "boruvka_xi.cpp",
     "kruskal":        SCRIPT_DIR / "kruskal.cpp",
     "filter_kruskal": SCRIPT_DIR / "filter_kruskal.cpp",
+    "prim":           SCRIPT_DIR / "prim.cpp",
     "gen":            SCRIPT_DIR / "gen.cpp",
 }
 
@@ -439,6 +440,9 @@ def build_all(par_threads):
          [str(SOURCES["filter_kruskal"]), "-o", str(BIN_DIR / "filter_kruskal")],
          "filter_kruskal"),
         (["g++"] + COMPILE_FLAGS +
+         [str(SOURCES["prim"]), "-o", str(BIN_DIR / "prim")],
+         "prim"),
+        (["g++"] + COMPILE_FLAGS +
          ["-DBMS_XI", str(SOURCES["bms_xi"]), "-o", str(BIN_DIR / "bms_xi")],
          "bms_xi"),
         (["g++"] + COMPILE_FLAGS +
@@ -494,6 +498,7 @@ def make_timing_bins(par_threads, include_par=True):
         ("boruvka",        [str(BIN_DIR / "boruvka"),        "--quiet"], {}),
         ("kruskal",        [str(BIN_DIR / "kruskal"),        "--quiet"], {}),
         ("filter_kruskal", [str(BIN_DIR / "filter_kruskal"), "--quiet"], {}),
+        ("prim",           [str(BIN_DIR / "prim"),           "--quiet"], {}),
         ("bms",            [str(BIN_DIR / "bms"),            "--quiet"], {}),
     ]
     if include_par:

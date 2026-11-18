@@ -31,6 +31,7 @@ Or manually:
 g++ -O2 -std=c++17 boruvka.cpp          -o boruvka
 g++ -O2 -std=c++17 kruskal.cpp          -o kruskal
 g++ -O2 -std=c++17 filter_kruskal.cpp   -o filter_kruskal
+g++ -O2 -std=c++17 prim.cpp             -o prim
 g++ -O2 -std=c++17 BMSBoruvka.cpp       -o bms
 g++ -O2 -std=c++17 -fopenmp parallel_boruvka.cpp -o parallel_boruvka
 g++ -O2 -std=c++17 -DBMS_XI BMSBoruvka.cpp -o bms_xi
@@ -176,6 +177,7 @@ project/
 |   |-- gen.cpp                  # Random graph generator
 |   |-- kruskal.cpp              # Standard Kruskal
 |   |-- parallel_boruvka.cpp     # Parallel Borůvka
+|   |-- prim.cpp                 # Prim with a binary heap
 |   |-- convert_snap.py          # Convert SNAP road-network format to bench input
 |   |-- run_bench.py             # Benchmark driver (build / gen / time / ξ / report)
 |
