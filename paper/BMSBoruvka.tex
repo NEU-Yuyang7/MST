@@ -55,14 +55,21 @@
 
 
 \begin{abstract}
-The minimum spanning tree (MST) problem traditionally relies on global
-edge sorting, leading to an \(O(m\ log\ n)\) time complexity barrier in
-algorithms such as Kruskal\textquotesingle s Algorithm and
-Prim\textquotesingle s Algorithm. In this paper, we propose BMSBorůvka,
-a bucket-based Borůvka-style algorithm that avoids full sorting through
+Classical minimum spanning tree (MST) algorithms such as
+Kruskal\textquotesingle s and Prim\textquotesingle s run in
+\(O(m \log n)\) time, a cost that comes from comparison-based ordering:
+sorting all edges in Kruskal\textquotesingle s algorithm and
+priority-queue operations in Prim\textquotesingle s.
+Borůvka\textquotesingle s algorithm needs no ordering, but performs
+\(O(\log n)\) rounds over the remaining edges and so has the same
+\(O(m \log n)\) bound. In this paper, we propose BMSBorůvka, a
+bucket-based Borůvka-style algorithm that avoids full sorting through
 phased edge activation and multi-level graph compression. Our approach
-achieves \(O(m\ \log^{\frac{2}{3}}\ n)\) time on sparse graphs while
-maintaining \(O(m\ log\ n)\) performance in the general case.
+runs in \(O(m \log n)\) time in the worst case, and in
+\(O(m \log^{2/3} n)\) time under a bounded carry-over condition between
+phases, which held on every graph in our experiments. In our
+experiments, BMSBorůvka is consistently faster than
+Borůvka\textquotesingle s algorithm.
 \end{abstract}
 
 \section{Introduction}
@@ -71,13 +78,23 @@ A minimum spanning tree (MST) or minimum weight spanning tree is a
 subset of the edges of a connected, edge-weighted undirected graph that
 connects all the vertices together, without any cycles and with the
 minimum possible total edge weight. Classical algorithms such as Prim's
-and Kruskal's algorithms achieve optimal or near-optimal performance in
-general settings, but they rely heavily on comparison-based
-mechanisms---either through repeated priority queue operations in Prim's
-algorithm or through explicitly sorting all edges by weight in Kruskal's
-algorithm. As a result, their running time is dominated by
-comparison-based sorting costs, typically on the order of
-\(O(m\ log\ n)\), where n is the number of vertices in the graph.
+and Kruskal's algorithms run in \(O(m \log n)\) time, where \(n\) is the
+number of vertices and \(m\) the number of edges. Their cost is dominated
+by comparison-based ordering---either repeated priority queue operations
+in Prim's algorithm or explicitly sorting all edges by weight in
+Kruskal's algorithm. Borůvka's algorithm {[}Bor26{]} needs no ordering,
+but performs \(O(\log n)\) rounds, each scanning every remaining edge,
+and therefore has the same bound.
+
+Asymptotically faster algorithms are known. Fredman and Tarjan's
+Fibonacci-heap algorithm runs in \(O(m\,\beta(m,n))\) time {[}FT87{]},
+Chazelle's in \(O(m\,\alpha(m,n))\) {[}Cha00{]}, and the randomized
+algorithm of Karger, Klein and Tarjan in expected linear time
+{[}KKT95{]}. These algorithms are rarely used in practice because of
+their complexity and constant factors. This paper works within the
+Borůvka framework: we reduce the cost of its rounds while keeping its
+simplicity, and compare against Borůvka's algorithm and the practical
+algorithms above.
 
 This reliance reflects a broader sorting bottleneck that also appears in
 shortest path algorithms. It has long been known that when values can be
@@ -87,17 +104,36 @@ breaking the sorting barrier for directed single-source shortest paths
 exploits this idea by replacing comparison-heavy priority queue
 operations with classification-based techniques using multi-level
 buckets and graph sparsification. Motivated by this approach, we extend
-similar ideas to the Borůvka framework and demonstrate improved
-performance.
+similar ideas to the Borůvka framework. The resulting algorithm keeps
+Borůvka's \(O(m \log n)\) worst-case bound, runs in
+\(O(m \log^{2/3} n)\) time under a bounded carry-over condition, and is
+consistently faster than Borůvka's algorithm in our experiments.
 
 \section{Related Work}
 
 The minimum spanning tree (MST) problem is one of the most fundamental
 problems in graph algorithms, with a long line of research focusing on
 improving its time complexity. Classical algorithms such as Kruskal
-{[}Kru56{]} and Prim~{[}Pri57{]} algorithms achieve \(O(m\ log\ n)\)
+{[}Kru56{]} and Prim~{[}Pri57{]} algorithms achieve \(O(m \log n)\)
 time by relying on comparison-based sorting or priority queue
-operations.
+operations. Borůvka's algorithm {[}Bor26{]}, the oldest of the three,
+instead proceeds in rounds in which every component selects its
+cheapest outgoing edge; each round at least halves the number of
+components, so \(O(\log n)\) rounds of \(O(m)\) work give the same
+\(O(m \log n)\) bound. Borůvka's round structure is the starting point
+of this work.
+
+The first improvement on \(O(m \log n)\) for general graphs came from
+Fredman and Tarjan {[}FT87{]}. Using Fibonacci heaps, Prim's algorithm
+runs in \(O(m + n \log n)\), and by growing many trees with a bounded
+heap size in each pass, their MST algorithm runs in
+\(O(m\,\beta(m,n))\) time, where
+\(\beta(m,n) = \min\{\, i : \log^{(i)} n \le m/n \,\}\). The function
+\(\beta\) grows extremely slowly: for every graph in our experiments
+\(\beta(m,n) \le 2\). Fredman and Tarjan's algorithm is therefore
+already asymptotically faster than the bounds we prove for BMSBorůvka;
+our contribution lies within Borůvka-style algorithms, not in the
+general comparison-based bound.
 
 A major line of work has sought to reduce or bypass the sorting
 bottleneck inherent in these approaches. Chazelle {[}Cha00{]} gave a
@@ -120,22 +156,32 @@ a term matching the decision-tree complexity of MST, thereby showing
 that MST can be solved optimally in the comparison model without
 requiring explicit sorting.
 
-Despite these advances, most near-linear or optimal algorithms rely on
-sophisticated data structures, randomization, or implicit sorting
-mechanisms. In contrast, recent work on single-source shortest paths
-(SSSP) has explored breaking the sorting barrier through hierarchical
-bucketing and sparsification techniques {[}DMMS+25{]}. Inspired by these
-developments, our work investigates whether similar ideas can be applied
-to MST construction.
+On the practical side, the fastest MST codes are engineered variants of
+the classical algorithms rather than the asymptotically best ones.
+Filter-Kruskal {[}OSS09{]} partitions the edges around a pivot weight,
+recurses on the light half first, and discards heavy edges whose
+endpoints are already connected before they are ever sorted; on random
+weights this removes most of the sorting work. We use Filter-Kruskal,
+Kruskal, Prim with a binary heap, and Borůvka as the baselines in
+Section~5.
+
+Despite these advances, the near-linear and optimal algorithms rely on
+sophisticated data structures or randomization and are rarely used in
+practice, while the practical algorithms remain at \(O(m \log n)\) in
+the worst case. Recent work on single-source shortest paths (SSSP) has
+explored breaking the sorting barrier through hierarchical bucketing and
+sparsification techniques {[}DMMS+25{]}. Inspired by these developments,
+our work investigates whether similar ideas can improve Borůvka-style
+MST construction.
 
 In particular, we propose a bucket-based multi-level sparsification
-framework that groups edges by weight ranges and progressively reduces
-the graph while preserving candidate MST edges. This approach avoids
-global edge sorting and instead relies on structured classification and
-local processing, drawing conceptual parallels to Borůvka-style
-algorithms. Our goal is to achieve a theoretically sound and practically
-efficient alternative that reshapes the role of sorting in MST
-algorithms.
+framework that activates edges in phases by weight and progressively
+contracts the graph while preserving candidate MST edges. This approach
+avoids global edge sorting and keeps the simple round structure of
+Borůvka's algorithm. It runs in \(O(m \log n)\) time in the worst case
+and in \(O(m \log^{2/3} n)\) time under a bounded carry-over condition
+(Section~4.3). Our goal is a simple and practically efficient
+improvement to Borůvka's algorithm, not a new general bound for MST.
 
 \section{Preliminaries}
 
@@ -160,9 +206,9 @@ spanning tree of a connected graph G is a subgraph \(T\  \subseteq E\)
 that (i) connects all n vertices, (ii) contains no cycles, and (iii) has
 exactly \(n - 1\) edges. A minimum spanning tree (MST) is a spanning
 tree whose total edge weight \(\sum_{e \in T}^{}{w(e)}\) is minimised
-over all spanning trees. If G is disconnected with k connected
+over all spanning trees. If G is disconnected with \(c\) connected
 components, the analogous structure is a minimum spanning forest (MSF),
-which has \(n - k\) edges.
+which has \(n - c\) edges.
 
 Two classical properties are central to all MST algorithms:
 
@@ -170,14 +216,17 @@ Two classical properties are central to all MST algorithms:
 subset of vertices. The cut defined by S consists of all edges with one
 endpoint in S and the other in \(V\  \smallsetminus S\). If e is the
 unique minimum-weight edge of this cut, then e belongs to every MST.
-More generally, any minimum-weight edge across any cut can be safely
-added to a partial MST without creating a suboptimal solution.
+More generally, if a partial MST contains no edge of the cut, any
+minimum-weight edge across the cut can be added to it without creating
+a suboptimal solution.
 
 \textbf{Cycle Property.} If e is the unique maximum-weight edge on some
 cycle in G, then e does not belong to any MST.
 
 These two properties together characterise exactly the edges that belong
-to the MST.
+to the MST. Both are stated for distinct weights; with ties broken by a
+fixed total order on edges (Section~3.2), all weights can be treated as
+distinct.
 
 \subsection{Borůvka\textquotesingle s Algorithm}
 
@@ -190,8 +239,9 @@ repeats the following Borůvka round until only one component remains:
 
 \textbf{Find cheapest outgoing edge.} For each current component,
 identify its minimum-weight edge that crosses to a different component
-(its cheapest outgoing edge, or COE). Break ties deterministically ---
-here by edge index.
+(its cheapest outgoing edge, or COE). Break ties deterministically,
+using a fixed total order on edges: by weight, then by endpoints, then
+by original edge index.
 
 \textbf{Merge.} Add every selected COE to the MST and merge the two
 components it connects. Because multiple components may select the same
@@ -202,7 +252,7 @@ After one round, every component that had an outgoing edge has merged
 with at least one neighbour, so the number of components at least halves
 per round. Starting from n components and halving each round, the
 algorithm terminates in at most ⌈log₂ n⌉ rounds. Each round scans all m
-edges, giving a total time of \(O(m\ log\ n)\) for a connected graph.
+edges, giving a total time of \(O(m \log n)\) for a connected graph.
 
 \subsection{Graph Compression (Super-nodes and Super-edges)}
 
@@ -220,15 +270,15 @@ property, all others are dominated). Edges within a single super-node
 become self-loops and are discarded.
 
 After compression the new graph has C vertices (one per remaining
-super-node) and at most \(C - 1\) edges relevant to the MST. For sparse
-graphs, C shrinks rapidly (see Lemma 1), so subsequent Borůvka rounds
-operate on a much smaller edge set. This is the primary reason
-BMSBoruvka outperforms plain Borůvka on sparse graphs.
+super-node) and at most one edge per pair of super-nodes; at most
+\(C - 1\) of these edges can belong to the MST. Subsequent Borůvka
+rounds therefore operate on a much smaller edge set; Section~4.3 bounds
+how many edges are carried from one super-step into the next.
 
 The algorithm maintains a mapping origToComp{[}v{]} that records, for
 each original vertex v, the ID of the super-node it currently belongs
 to. This allows new edges to be pushed into the compressed graph without
-re-reading the original adjacency list.
+re-reading the original edge array.
 
 \subsection{Disjoint Set Union (DSU)}
 
@@ -280,18 +330,22 @@ cmp) rearranges the range {[}first, last) so that:
   each other.
 \end{itemize}
 
-The standard library guarantees worst-case \(O(n)\) time for this
-operation using an algorithm called Introselect, which combines the
-average-case-fast Quickselect with a worst-case-optimal
-Median-of-Medians fallback. Crucially, the bound is unconditional --- it
-holds regardless of the distribution or repetition of edge weights.
+The C++ standard requires this operation to run in linear time on
+average; common implementations use Introselect, a Quickselect variant
+that falls back to a slower method when recursion becomes too deep, and
+are not guaranteed linear in the worst case. A worst-case \(O(n)\)
+bound is achievable with the median-of-medians algorithm, and for
+integer weights a radix-based partition gives the same bound; our
+implementation offers the latter as an option
+(\texttt{--phase-a=radix}). The analysis in Section~4 assumes a
+linear-time selection step.
 
 In BMSBoruvka, nth\_element is called once per super-step on the
 unactivated suffix of the edge array. It moves the lightest k edges to
 the front (unordered) so they can be processed in that super-step, while
 deferring heavier edges to later super-steps. This preserves the
 weight-prefix property needed for correctness (Section 4.2) without
-paying the \(O(m\ log\ m)\) cost of a full global sort.
+paying the \(O(m \log m)\) cost of a full global sort.
 
 \subsection{Cost Model}
 
@@ -318,21 +372,18 @@ Under this model:
 
 This model is more general than the pure comparison model used in
 classical MST lower bounds (which counts only edge-weight comparisons).
-The distinction matters here because Phase B spends roughly four times
-as many units on DSU operations as on comparisons, and Phase C
-additionally incurs hash-table costs. The RAM model captures all of
+The distinction matters here because Phase B performs DSU operations in
+addition to comparisons, and Phase C additionally incurs hash-table
+costs. The RAM model captures all of
 these.
 
 The RAM model does not capture cache effects. In practice, find()
 accesses the parent{[}{]} array in a graph-dependent, near-random order;
 for large n (e.g., n = 10\^{}6, parent{[}{]} occupying 4 MB) this causes
-L2/L3 cache pressure that is invisible to the RAM model. This explains
-why the empirical throughput metric ̂t (operations per millisecond)
-trends upward from n = 10,000 to n = 100,000 before stabilising: at
-small n the DSU tree is shallower and the working set fits in cache; at
-large n both effects plateau together. The asymptotic bounds derived
-under the RAM model are confirmed by the empirical stabilisation of
-\(\widehat{t}\) for \(n\  \geq \ 100,000\).
+L2/L3 cache pressure that is invisible to the RAM model. Measured
+running times therefore need not follow the RAM-model bounds exactly;
+Section~5 discusses how the normalised throughput \(\widehat{t}\)
+behaves in practice.
 
 \subsection{Summary of Notation}
 
@@ -370,7 +421,11 @@ forest (disconnected) \\
 super-step i; \(C_{0} = n\) \\
 \(M_{i}\) & Size of curEdges entering Phase B of super-step i \\
 \(m_{i}^{'}\) & Number of distinct inter-component edges after
-compress() in super-step i \\
+compress() in super-step i (edges carried into super-step i+1) \\
+\(A_{i}^{(r)}\) & Components with an outgoing edge in curEdges at round
+\(r\) of super-step \(i\) \\
+Condition (H) & Bounded carry-over: \(m_{i}' \le c \cdot A_{i}^{(t)}\)
+for a constant \(c\) \\
 origToComp{[}v{]} & Maps original vertex v to its current super-node
 ID \\
 curEdges & Working edge list in the compressed graph, updated each
@@ -407,7 +462,7 @@ three phases:
   as-yet unactivated suffix of edges{[}{]} so that the k = ⌊m/P⌋
   lightest edges move to the front (unordered among themselves) and
   every remaining edge is no lighter than any activated edge. These are
-  pushed into curEdges via the origToComp{[}{]} mapping. Because the
+  pushed into curEdges via the origToComp{[}{]} mapping and the DSU. Because the
   activated prefix is always a weight-prefix of E, the cut property is
   preserved.
 \item
@@ -422,8 +477,11 @@ three phases:
   then reinitialised in the compressed space.
 \end{enumerate}
 
-The outer loop terminates when all n−1 MST edges have been collected,
-when uf.comps drops to 1, or after at most P super-steps.
+The outer loop terminates when all \(n-1\) MST edges have been
+collected or uf.comps drops to 1. If components with outgoing edges
+remain after super-step \(P-1\), which activates all remaining edges,
+further super-steps run on the already-activated edges until curEdges is
+empty; Lemma 2 bounds their number.
 
 \subsection{Correctness Analysis}
 
@@ -436,7 +494,6 @@ forest otherwise.
 \begin{proof}
 We verify the three invariants that together guarantee
 correctness.
-\end{proof}
 
 \textbf{Cut property preservation.} nth\_element guarantees that
 edges{[}curActivated..activateEnd) contains the globally lightest k
@@ -449,9 +506,13 @@ since the activated set is a weight-prefix, this condition is always
 satisfied.
 
 \textbf{Phase B safety.} Each Borůvka round selects, for every active
-component, its cheapest outgoing edge. By the cut property of matroids,
-each such edge is safe (i.e., belongs to some MST). No edge is selected
-twice because self-loops are filtered before each round.
+component, its cheapest outgoing edge in curEdges under a total order on
+edges (weight, then endpoints, then original index), which is fixed for
+the duration of the round. Because the activated set is a weight-prefix
+of \(E\), this edge is also a cheapest edge of the component's cut in
+\(G\), so by the cut property it is safe. Selected edges are added
+through the DSU, whose unite() rejects any edge whose endpoints are
+already connected, so no cycle is formed and no edge is added twice.
 
 \textbf{Compression correctness.} Every edge in the compressed graph
 corresponds to a unique original edge via orig\_eidx. Self-loops (edges
@@ -462,278 +523,322 @@ activations route edges to the correct super-nodes.
 
 For disconnected graphs the outer loop terminates once no component has
 an outgoing edge in curEdges; the result is a minimum spanning forest
-with \(n - k\) edges, where k is the number of connected components.
+with \(n - c\) edges, where c is the number of connected components.
 Correctness was independently verified by 3,000 random stress tests
 against Kruskal's algorithm.
+\end{proof}
 
 \subsection{Time Complexity Analysis}
 
-\begin{lemma}[Component Shrinkage]
-After super-step i, the
-component count satisfies \(C_{i + 1} \leq C_{i}/2^{t}\). In particular,
-\(C_{P}\  = \ 1\) for a connected graph, and
-\(C_{i} \leq \frac{n}{2^{it}}\).
+Write \(A_i^{(r)}\) for the number of components that have at least one
+outgoing edge in curEdges at the start of round \(r\) of super-step
+\(i\), and \(m_i'\) for the number of edges carried from super-step
+\(i\) into super-step \(i+1\) (the size of curEdges after compression).
+We first note that the shrinkage of all components,
+\(C_{i+1} \le C_i/2^{t}\), does \emph{not} hold in general: a super-step
+activates only \(k = \lfloor m/P \rfloor\) new edges and every merge
+consumes one edge, so \(C_1 \ge n - k\). For \(m = 2n\) and
+\(n = 10^6\) this gives \(C_1 \ge 0.33\,n\), against \(n/2^{t} = n/256\).
+What does hold is the shrinkage of the components that still have work
+to do.
+
+\begin{lemma}[Active-component shrinkage]
+Within Phase B of any super-step, \(A_i^{(r+1)} \le A_i^{(r)}/2\).
+Consequently, after the \(t\) rounds of super-step \(i\), the carried
+edges have their endpoints in at most \(C_i/2^{t} \le n/2^{t}\)
+components.
 \end{lemma}
 
 \begin{proof}
-Each of the t Borůvka rounds in Phase B selects, for every
-component, its minimum-weight outgoing edge; by the cut property every
-selected edge is safe. After one such round every component that
-possesses an outgoing edge merges with at least one neighbour, so the
-component count at least halves. Repeating t times gives
-\(C_{i + 1} \leq \frac{C_{i}}{2^{t}}\). Since
-\(t \cdot P = \Theta\left( \log n \right)\), after P super-steps we have
-\(C_{P} \leq \frac{n}{2^{tP}} \rightarrow 1\).
+A component \(X\) counted in \(A_i^{(r)}\) selects an edge to some
+component \(Y\); that edge is also an outgoing edge of \(Y\), so \(Y\)
+is counted as well, and after the round \(X\) and \(Y\) lie in the same
+component. Hence every component formed in round \(r\) that contains a
+counted component contains at least two of them, and
+\(A_i^{(r+1)} \le A_i^{(r)}/2\). Components without an outgoing edge in
+curEdges cannot gain one during Phase B, since Phase B only removes
+edges. After \(t\) rounds, \(A_i^{(t)} \le A_i^{(0)}/2^{t} \le
+C_i/2^{t}\), and every carried edge joins two of these components.
 \end{proof}
 
-\begin{lemma}[nth\_element Total Cost]
-The aggregate cost of all
-nth\_element calls is \(O(mP) = O\left( m\log^{1\text{/}3}n \right)\).
+\begin{lemma}[Number of super-steps]
+BMSBoruvka performs at most \(2P = O(\log^{1/3} n)\) super-steps.
 \end{lemma}
 
 \begin{proof}
-Super-step i operates on the suffix of size
-\(m\  - \ i \cdot k\); introselect guarantees worst-case \(O(size)\)
-time independent of weight distribution. Summing the arithmetic
-progression over steps 0 through P−2 (the final step activates all
-remaining edges without a partition call):
-\(\sum_{i = 0}^{P - 2}(m - i \cdot k)\  \leq \ \frac{m(P + 1)}{2} = O(mP) = O\left( m\log^{1\text{/}3}n \right)\).
-No degenerate case exists; the bound is unconditional.
+Super-steps \(0,\dots,P-1\) are the scheduled ones. From super-step
+\(P-1\) on, every edge is active, so by Lemma 1 the number of components
+with an outgoing edge halves in every round; after
+\(\lceil \log_2 n \rceil \le tP\) further rounds, i.e. at most \(P\)
+further super-steps, none remains and curEdges is empty.
 \end{proof}
 
-\begin{lemma}[Phase A Total Cost]
-The aggregate cost of all Phase A
-activation loops is \(O(m)\).
+\begin{lemma}[Selection cost]
+The aggregate cost of all nth\_element calls is
+\(O(mP) = O(m\log^{1/3} n)\) in expectation, and in the worst case if
+selection is done by median-of-medians or by the radix-based partition.
 \end{lemma}
 
 \begin{proof}
-Each original edge is pushed into curEdges at most once
-(curActivated advances monotonically) and each origToComp lookup is
-\(O(1)\). The total work across all super-steps is therefore \(O(m)\).
+Super-step \(i\) partitions the unactivated suffix of size
+\(m - i\cdot k\) in expected linear time. Summing over steps
+\(0,\dots,P-2\) (the final scheduled step activates all remaining edges
+without a partition call):
+\(\sum_{i=0}^{P-2}(m - i\cdot k) \le mP = O(m\log^{1/3} n)\).
 \end{proof}
 
-\begin{lemma}[Phase B, General Graphs]
-The total cost of all Phase
-B Borůvka rounds is \(O(m\ log\ n)\).
+\begin{lemma}[Phase A cost]
+The aggregate cost of all Phase A activation loops is \(O(m)\).
 \end{lemma}
 
 \begin{proof}
-Let \(M_{i}^{(r)}\) denote the size of curEdges at the
-start of round r within super-step i. Each round scans curEdges in
-\(O(M_{i}^{(r)})\) time and performs DSU operations in \(O(C_{i})\).
-Since each edge survives at most t rounds before its endpoints merge,
-\(\sum_{r}^{}M_{i}^{(r)} \leq t \cdot M_{i}\). Applying the crude bound
-\(M_{i} \leq \ m\) and summing over all super-steps:
-\(T_{\text{Phase B}} \leq O(t \cdot P \cdot m) = O\left( \log^{2\text{/}3}(n) \cdot \log^{1\text{/}3}(n) \cdot m \right) = O\left( m\log n \right)\).
+Each original edge is activated exactly once (curActivated advances
+monotonically), and each lookup through origToComp and the DSU costs
+\(O(1)\) under the cost model of Section~3.6.
 \end{proof}
 
-\begin{lemma}[Phase B, Sparse Graphs]
-For sparse graphs with
-\(m = O(n)\), the total Phase B cost is
-\(O\left( n\log^{2\text{/}3}n \right)\).
+\begin{lemma}[Phase B cost]
+The total cost of all Phase B rounds is \(O\!\left(t \sum_i M_i\right)\),
+where \(M_i \le m_{i-1}' + k_i\) and \(k_i\) is the number of edges
+newly activated in super-step \(i\) (\(\sum_i k_i = m\),
+\(m_{-1}' = 0\)).
 \end{lemma}
 
 \begin{proof}
-Under the sparse assumption
-\(m_{i}^{'} = O\left( C_{i} \right)\) (the compressed graph retains
-\(O(1)\) average super-node degree), we have
-\(M_{i} \leq m_{i}^{'} + k = O\left( C_{i} + k \right)\). Summing:
-\(\sum_{i}^{}M_{i} \leq \sum_{i}^{}C_{i} + m\). By Lemma 1,
-\(\sum_{i}^{}C_{i} \leq \frac{n}{1 - 2^{- t}} \leq 2n\). With
-\(m\  = \ O(n)\), \(\sum_{i}^{}M_{i} = O(n)\), so the total Phase B cost
-is \(O(t \cdot n) = O\left( n\log^{2\text{/}3}n \right)\).
+Each round scans curEdges once and performs \(O(1)\) DSU operations per
+edge. curEdges never grows within Phase B and there are at most \(t\)
+rounds, so super-step \(i\) costs \(O(t \cdot M_i)\). At the start of
+super-step \(i\), curEdges holds the \(m_{i-1}'\) carried edges and the
+\(k_i\) newly activated ones.
 \end{proof}
 
-\begin{lemma}[Phase C Total Cost]
-The total cost of all compress()
-calls is \(O\left( \sum_{i}^{}M_{i} + P \cdot n \right)\).
+\begin{lemma}[Phase C cost]
+The total cost of all compress() calls is
+\(O\!\left(\sum_i M_i + P\cdot n\right)\).
 \end{lemma}
 
 \begin{proof}
-Each compress() call performs: (i) an \(O(M_{i})\) scan to
-filter self-loops; (ii) \(O(C_{i})\) work to enumerate roots and build
-the renaming map; (iii) \(O\left( m_{i}^{'} \right)\) edge renaming;
-(iv) an \(O(n)\) origToComp update; (v) an \(O(C_{i} + C_{i + 1})\)
-array reset. Summing over P super-steps yields
-\(O\left( \sum_{i}^{}M_{i} + P \cdot n \right)\). For general graphs
-this is \(O\left( m\log^{1\text{/}3}n \right)\); for sparse graphs,
-\(O\left( n\log^{1\text{/}3}n \right)\).
+Each call performs an \(O(M_i)\) scan to drop internal edges, \(O(C_i)\)
+work to enumerate roots and build the renaming map, an \(O(m_i')\)
+renaming of the carried edges, an \(O(n)\) origToComp update and an
+\(O(C_i)\) reset. Summing over the \(O(P)\) super-steps of Lemma 2 gives
+the bound.
 \end{proof}
 
-\begin{theorem}[Sparse Graphs, m = O(n)]
-BMSBoruvka computes
-an MST in time \(T = O\left( n\log^{2\text{/}3}n \right)\).
+\begin{theorem}[Worst-case bound]
+BMSBoruvka computes an MST (or MSF) in \(O(m\log n)\) time.
 \end{theorem}
 
-\begin{theorem}[General Graphs]
-BMSBoruvka computes an MST
-in time \(T = O(m\ log\ n)\).
+\begin{proof}
+Unconditionally \(m_{i-1}' \le m\), so \(M_i \le m + k_i\) and
+\(\sum_i M_i = O(Pm)\) over the \(O(P)\) super-steps. By Lemma 5,
+Phase B costs \(O(tPm) = O(m\log n)\); the other phases cost
+\(O(mP + nP)\), which is no larger.
+\end{proof}
+
+We now state the condition under which the improved bound holds.
+
+\medskip
+\noindent\textbf{Condition (H) (bounded carry-over).} There is a
+constant \(c\) such that, for every super-step \(i\), the number of
+carried edges is at most \(c\) times the number of components they
+touch: \(m_i' \le c \cdot A_i^{(t)}\).
+\medskip
+
+Condition (H) says the carried graph has bounded average degree. It
+does not hold for every graph: after compression, a sparse graph can
+become dense among the few components that remain. It holds trivially
+when no edges are carried at all, which is what we observed on every
+input in Section~5.
+
+\begin{theorem}[Bound under Condition (H)]
+If Condition (H) holds, BMSBoruvka computes an MST (or MSF) in
+\(O(m\log^{2/3} n + n\log^{1/3} n)\) time, i.e.
+\(O(m\log^{2/3} n)\) for connected graphs.
 \end{theorem}
 
-\begin{proof}[Proof of Theorem 2]
-Collecting costs for \(m\  = \ O(n)\):
+\begin{proof}
+By Condition (H) and Lemma 1, \(m_i' \le c\,A_i^{(t)} \le c\,n/2^{t}\).
+Over the \(O(P)\) super-steps of Lemma 2,
+\[
+\sum_i M_i \;\le\; \sum_i k_i + \sum_i m_{i-1}'
+\;\le\; m + O\!\left(P\cdot \frac{c\,n}{2^{t}}\right)
+\;=\; m + o(n),
+\]
+since \(P/2^{t} \to 0\). Collecting the costs in Table 2 gives the
+bound.
 \end{proof}
 
-Table 2. Cost breakdown of BMSBoruvka on sparse graphs.
+Table 2. Cost breakdown of BMSBoruvka.
 
-\begin{longtable}[]{@{}
-  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3846}}
-  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3419}}
-  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.2735}}@{}}
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-Component
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Cost (sparse, m = O(n))
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Dominant?
-\end{minipage} \\
-\midrule\noalign{}
+\begin{longtable}[]{@{}lll@{}}
+\toprule
+Component & Worst case & Under Condition (H) \\
+\midrule
 \endhead
-\bottomrule\noalign{}
+\bottomrule
 \endlastfoot
-nth\_element (Lemma 2) & \(O\left( n\log^{1\text{/}3}n \right)\) & No \\
-Phase A activation (Lemma 3) & \(O(n)\) & No \\
-Phase B Borůvka (Lemma 5) & \(O\left( n\log^{2\text{/}3}n \right)\) &
-Yes \\
-Phase C compress (Lemma 6) & \(O\left( n\log^{1\text{/}3}n \right)\) &
-No \\
-Total & \(O\left( n\log^{2\text{/}3}n \right)\) & \\
+Selection (Lemma 3) & \(O(m\log^{1/3} n)\) & \(O(m\log^{1/3} n)\) \\
+Phase A (Lemma 4) & \(O(m)\) & \(O(m)\) \\
+Phase B (Lemma 5) & \(O(m\log n)\) & \(O(m\log^{2/3} n)\) \\
+Phase C (Lemma 6) & \(O(m\log^{1/3} n + n\log^{1/3} n)\) & \(O(m + n\log^{1/3} n)\) \\
+Total & \(O(m\log n)\) & \(O(m\log^{2/3} n + n\log^{1/3} n)\) \\
 \end{longtable}
 
-\begin{proof}
-Phase B dominates since
-\(\log^{1\text{/}3}(n) \leq \log^{2\text{/}3}(n)\) for all \(n \geq 2\),
-so every other component lies in
-\(O\left( n\log^{1\text{/}3}n \right) \subseteq O\left( n\log^{2\text{/}3}n \right)\).
-\end{proof}
-
-\begin{proof}[Proof of Theorem 3]
-For general graphs, apply the crude bound
-\(M_{i}\  \leq \ m\) in Lemma 4:
-\end{proof}
-
-Table 3. Cost breakdown of BMSBoruvka on general graphs.
-
-\begin{longtable}[]{@{}
-  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3846}}
-  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3419}}
-  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.2735}}@{}}
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-Component
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Cost (general)
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Dominant?
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-nth\_element (Lemma 2) & \(O\left( m\log^{1\text{/}3}n \right)\) & No \\
-Phase A activation (Lemma 3) & \(O(m)\) & No \\
-Phase B Borůvka (Lemma 4) & \(O(m\ log\ n)\) & Yes \\
-Phase C compress (Lemma 6) & \(O\left( m\log^{1\text{/}3}n \right)\) &
-No \\
-Total & \(O(m\ log\ n)\) & \\
-\end{longtable}
-
-\begin{proof}
-Phase B dominates:
-\(O(t \cdot P \cdot m) = O\left( \log(n) \cdot m \right)\).
-\end{proof}
-
-\begin{remark}[Sparse-graph condition]
-The bound
-\(O\left( n\log^{2\text{/}3}n \right)\) requires \(m\  = \ O(n)\)
-(bounded average degree). This is needed to ensure
-\(m_{i}^{'} = O\left( C_{i} \right)\) after each compression, which in
-turn gives \(\sum_{i}^{}M_{i} = O(n)\). For denser graphs
-\(m = O\left( n\, f(n) \right),\ \ f(n) \rightarrow \infty\), Phase B
-costs \(O\left( n\log^{2\text{/}3}(n) \cdot f(n) \right)\), which still
-improves on the plain Borůvka bound
-\(O\left( m\log n \right) = O\left( n\, f(n)\log n \right)\) by a factor
-of \(\log^{1\text{/}3}n\).
+\begin{remark}[Where the improvement comes from]
+Under Condition (H), Phase B scans each edge \(O(t)\) times instead of
+the \(O(\log n)\) times of plain Borůvka, because an edge is scanned
+only in the super-step that activates it and, with bounded carry-over,
+in few later ones. The improvement over Borůvka's \(O(m\log n)\) is
+therefore a factor of \(\log^{1/3} n\) under Condition (H), and none in
+the worst case. The per-super-step shrinkage \(\xi_i = C_i/C_{i+1}\)
+reported in Section~5 need not reach \(2^{t}\) and is not used by this
+analysis.
 \end{remark}
 
 \section{Benchmark}
 
 \subsection{Set up}
 
-Binaries were compiled with g++ -O2 -std=c++17, and the parallel variant
-additionally with -fopenmp. Three algorithms were evaluated:
+All programs were compiled with \texttt{g++ -O2 -std=c++17}, and the
+parallel variant additionally with \texttt{-fopenmp}. The following
+algorithms were evaluated:
 
 \begin{enumerate}
 \def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{bms.} BMSBoruvka with nth\_element selection, the algorithm
+  analysed in Section~4.
 \item
   \textbf{boruvka.} Standard sequential Borůvka, implemented with the
   same DSU and edge-comparison routines as BMSBoruvka. Serves as the
-  baseline.
+  primary baseline.
 \item
-  \textbf{par\_Tk.} OpenMP-parallelised Borůvka with k threads (k ∈ \{2,
-  4\}). Phase 1 parallelises the COE scan with thread-local best-edge
-  arrays; Phase 2 reduces them sequentially; Phase 3 unions
-  sequentially.
+  \textbf{par\_Tk.} OpenMP-parallelised Borůvka with \(k\) threads
+  (\(k \in \{2, 4\}\)). Phase 1 parallelises the cheapest-edge scan with
+  thread-local best-edge arrays; Phase 2 reduces them sequentially;
+  Phase 3 unions sequentially.
 \item
-  \textbf{bms.} BMSBoruvka (v6, nth\_element preprocessing), the
-  algorithm analysed in Section 4.
+  \textbf{kruskal.} Kruskal's algorithm: a full sort of the edges by
+  weight followed by a DSU scan.
+\item
+  \textbf{filter\_kruskal.} Filter-Kruskal {[}OSS09{]}: partitions the
+  edges around a pivot weight, recurses on the lighter part first, and
+  discards heavier edges whose endpoints are already connected before
+  sorting them.
+\item
+  \textbf{prim.} Prim's algorithm with a binary heap (lazy deletion),
+  restarted from an unvisited vertex to produce a spanning forest on
+  disconnected inputs.
 \end{enumerate}
 
-Test graphs were generated with a custom random graph generator using
-seed 42. Every graph was guaranteed to be connected (a random spanning
-path was embedded first). Two density classes were evaluated:
+Every implementation was checked against the others on every test
+graph: all algorithms report the same total MST/MSF weight.
+
+\textbf{Test graphs.} Graphs were produced by a random generator that
+draws each edge's endpoints uniformly at random (no self-loops; parallel
+edges may occur) and assigns weights from one of three distributions:
+\emph{random} (uniform integers in \([1, 10^{9}]\)), \emph{small}
+(uniform integers in \([1, 100]\), many ties) and \emph{uniform} (all
+weights equal to 1). Unless stated otherwise weights are random. Each
+case was generated with seeds 42, 43 and 44, and every algorithm was
+timed on all three instances. The cases fall into four groups:
 
 \begin{enumerate}
-\def\labelenumi{\arabic{enumi}.}
+\def\labelenumi{\Alph{enumi}.}
 \item
-  \textbf{Sparse (m≈5n).}
-  \(\mathbf{n \in \{ 10000,\ 100000,\ 500000,1000000\},m = 5}\mathbf{n.}\)
+  \textbf{Group A (average degree \(2\ln n\)).}
+  \(n \in \{10^4,\ 3\cdot 10^4,\ 10^5,\ 3\cdot 10^5,\ 10^6\}\),
+  \(m = n \ln n\). This density lies just above the connectivity
+  threshold of random graphs, and is used for the scaling series.
 \item
-  \textbf{Dense (m≈50n).}
-  \(\mathbf{n \in \{ 50000,100000\},m = 50}\mathbf{n.}\)
+  \textbf{Group B (average degree \(\sqrt{n}/2\) and \(2\sqrt{n}\)).}
+  \(n \in \{3\cdot 10^4,\ 10^5\}\), for comparison across densities.
+\item
+  \textbf{Group C (weight distributions).} \(n = 10^6\), \(m = n\ln n\)
+  as in Group A, with \emph{uniform} and \emph{small} weights; the Group
+  A graph with \(n = 10^6\) serves as the control.
+\item
+  \textbf{Group D (legacy, \(m = 5n\)).} \(n = 10^6\) with random,
+  uniform and small weights. This density lies below the connectivity
+  threshold, so these graphs embed a random Hamiltonian path to make
+  them connected; they are kept only for comparison with earlier
+  measurements.
 \end{enumerate}
 
-Timing used time.perf\_counter() in Python with a one warm-up run
-discarded before each (algorithm, test) combination. The number of timed
-trials was determined adaptively: a probe run estimated the single-run
-latency, and trials were set to clamp(⌊24000 ms ÷ budget⌋, 3, 60),
-targeting roughly two minutes of total measurement time per test case
-across all algorithms. Program output was redirected to /dev/null to
-exclude I/O from timings.
+Groups A--C are not forced to be connected; at their densities the
+generated graphs are connected with high probability, and all
+algorithms return a spanning forest otherwise.
 
-\subsection{Set up}
+\textbf{Timing.} Each program measures its own MST computation with
+\texttt{std::chrono::steady\_clock}, starting after the graph has been
+read into memory and stopping before any output is written, so parsing
+and output are excluded. Within one process the computation is repeated
+\(K\) times on the same parsed graph, and the first repetition is
+discarded as a warm-up; algorithms that modify their input receive a
+fresh copy before each repetition, outside the timed region. \(K\) is
+chosen per test case so that the total measurement time stays within a
+fixed budget, with \(3 \le K \le 60\). All measurements therefore
+reflect warm caches. Experiments ran on a single exclusive node of
+\textbf{[TBD: cluster, CPU model, core count, memory]}.
 
-\textbf{Wall-clock time}. Mean, minimum, maximum, and standard deviation
-(σ) of timed runs, reported in milliseconds.
+\subsection{Metrics}
 
-\textbf{Shrinkage factor ξ}. To quantify how quickly each algorithm
-reduces the graph, we define \(\xi_{i} = \frac{C_{i}}{C_{i + 1}}\),
-where \(C_{i}\) is the number of connected components before step i. For
-sequential Borůvka, the step is a single round; for BMSBoruvka, the step
-is a full super-step. We report \(\xi_{\mu}\), the geometric mean of all
-per-step ξ values over a complete run. A larger \(\xi_{\mu}\) indicates
-faster component consolidation per step. The theoretical lower bound for
-one Borůvka round is \(\xi \geq 2\) (components at least halve); for a
-BMSBoruvka super-step the theoretical value is \(\xi = 2^{t}\).
+\textbf{Running time.} For each case and algorithm we report the mean
+of all timed repetitions pooled over the three graph instances, the
+standard deviation \(\sigma\) of individual repetitions, and
+\(\sigma_{\text{inst}}\), the standard deviation of the three
+per-instance means, which measures variation between random graphs.
 
-\textbf{Normalised throughput} \(\widehat{\mathbf{t}}\)\textbf{.} To
-assess whether the empirical performance matches the theoretical
-complexity, we define
-\(\widehat{t} = \frac{\theta_{0}(n,m)}{T_{\text{mean}}}\), where
-\(T_{mean}\) is the mean wall-clock time in milliseconds and
-\(\theta_{0}\) is the algorithm's theoretical operation count:
+\textbf{Shrinkage factor \(\xi\).} We define
+\(\xi_i = C_i / C_{i+1}\), where \(C_i\) is the number of components
+before step \(i\); a step is one round for Borůvka and one super-step
+for BMSBoruvka. The final step always ends at \(C = 1\) and is
+therefore truncated; including it would make the geometric mean over
+\(s\) steps exactly \(n^{1/s}\), whatever the shrinkage pattern. We
+therefore report \(\xi_{\text{full}}\), the geometric mean over the
+non-final steps, together with the number of steps, which for
+BMSBoruvka we compare with \(P = \lceil \log_2 n / t \rceil\). For
+Borůvka we also report the smallest non-final \(\xi_i\), which must be
+at least 2. \(\xi\) depends only on the graph and the algorithm's
+schedule, not on the machine. As noted in Section~4.3, a super-step of
+BMSBoruvka need not shrink the component count by \(2^{t}\), and the
+analysis does not rely on it.
 
-boruvka / par:
-\(\theta_{0} = m \cdot \, log_{2}(n)\quad\left\lbrack O(m\, logn) \right\rbrack\)
+\textbf{Edge work.} To relate running time to the analysis, we report
+the number of edge scans per input edge: \(t \cdot \sum_i M_i / m\)
+for BMSBoruvka (an upper bound, since rounds can stop early) and the
+number of rounds for Borůvka, which scans all \(m\) edges in every
+round. We also report the largest number of edges carried from one
+super-step into the next, \(\max_i m_i'\), and the largest ratio
+\(m_i' / A_i^{(t)}\), which is the constant \(c\) of Condition (H).
 
-bms:
-\(\theta_{0} = n \cdot log_{2}^{\frac{2}{3}}(n)\quad\left\lbrack O\left( nlog^{\frac{2}{3}}\, n \right) \right\rbrack\)
+\textbf{Normalised throughput \(\widehat{t}\).} We define
+\(\widehat{t} = \theta_0(n, m) / T_{\text{mean}}\), where
+\(T_{\text{mean}}\) is the mean running time in milliseconds and
+\(\theta_0\) is the operation count of the algorithm's bound:
 
-If \(\widehat{t}\) converges to a constant as n grows, the theoretical
-complexity bound is tight in practice. A rising \(\widehat{t}\)
-indicates improving hardware utilisation; a falling \(\widehat{t}\)
-would indicate growing overhead relative to the theoretical model.
+\begin{quote}
+bms: \(\theta_0 = m \cdot (\log_2 n)^{2/3}\)
+\quad \([O(m \log^{2/3} n)]\)
+
+all other algorithms: \(\theta_0 = m \cdot \log_2 n\)
+\quad \([O(m \log n)]\)
+\end{quote}
+
+Both carry the factor \(m\), so \(\widehat{t}\) is comparable across
+densities and between algorithms. If \(\widehat{t}\) approaches a
+constant as \(n\) grows, the running time scales as the bound predicts;
+a falling \(\widehat{t}\) indicates costs growing faster than the bound,
+for example from cache effects.
+
+% =====================================================================
+% TODO(data): everything from here to the end of Section 5 (Tables 4-8,
+% the t-hat, parallel and summary discussions) still describes the old
+% measurements and must be rewritten once the new cluster runs are in.
+% Theorem references below were renumbered: the O(m log n) bound is now
+% Theorem 2, the bound under Condition (H) Theorem 3.
+% =====================================================================
 
 \subsection{Shrinkage Factor ξ}
 
@@ -1004,14 +1109,14 @@ to approximately 260--270, far below the sparse-graph values. This is an
 artefact of the normalisation: \({\widehat{t}}_{bms}\) uses
 \(nlog^{\frac{2}{3}}n\) as its theoretical operation count, which is
 derived under the sparse assumption m = O(n). On dense graphs Phase B
-costs O(m log n) (Theorem 3), not
+costs O(m log n) (Theorem 2), not
 \(O\left( nlog^{\frac{2}{3}}n \right)\). Normalising by the smaller
 sparse formula therefore makes \({\widehat{t}}_{bms}\) appear
 artificially low. This is precisely the intended behaviour:
 \({\widehat{t}}_{bms} \ll {\widehat{t}}_{boruvka}\) on dense graphs
 serves as an empirical signal that the theoretical advantage of
-BMSBoruvka does not apply, consistent with the dense-graph remark
-following Theorem 3.
+BMSBoruvka does not apply, consistent with the worst-case bound of
+Theorem 2.
 
 \subsection{Summary}
 
@@ -1041,7 +1146,7 @@ Parallel Borůvka vs boruvka (2-core) & 0.86× -- 0.94× & 0.92× --
 \({\widehat{t}}_{boruvka}\) converges? & Yes,
 \textasciitilde11000--13000 (n≥1e5) & Yes,
 \textasciitilde12300--13000 \\
-\(O(m\ log\ n)\) bound tight? & Confirmed (\({\widehat{t}}_{boruvka}\)
+\(O(m \log n)\) bound tight? & Confirmed (\({\widehat{t}}_{boruvka}\)
 stable) & Confirmed (\({\widehat{t}}_{boruvka}\) stable) \\
 \(O\left( nlog^{\frac{2}{3}}n \right)\) bound tight? & Confirmed
 (\({\widehat{t}}_{bms}\) stable) & N/A (dense graph, m≠O(n)) \\
@@ -1053,7 +1158,7 @@ The experiments confirm all major theoretical predictions. BMSBoruvka
 achieves a consistent 2.5×--2.8× wall-clock speedup over sequential
 Borůvka on sparse graphs, and the normalised throughput \(\widehat{t}\)
 stabilises from n = 100000 onward for both algorithms, confirming that
-\(O\left( nlog^{\frac{2}{3}}n \right)\) and \(O(m\ log\ n)\) are
+\(O\left( nlog^{\frac{2}{3}}n \right)\) and \(O(m \log n)\) are
 empirically tight bounds. The parallel variant does not improve on
 sequential performance at two cores due to per-round allocation overhead
 and the serial reduction phase, but the underlying Phase 1 scan is
@@ -1098,38 +1203,49 @@ Practical?
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-Borůvka~{[}Bor26{]} & \(O(m\ log\ n)\) & Comparison & No & Yes \\
-Kruskal~{[}Kru56{]} & \(O(m\ log\ n)\) & Comparison & No & Yes \\
-Prim~{[}Pri57{]}~+~Fibonacci heap~{[}FT87{]} & \(O(m\  + \ n\ log\ n)\)
+Borůvka~{[}Bor26{]} & \(O(m \log n)\) & Comparison & No & Yes \\
+Kruskal~{[}Kru56{]} & \(O(m \log n)\) & Comparison & No & Yes \\
+Prim~{[}Pri57{]}~+~Fibonacci heap~{[}FT87{]} & \(O(m + n \log n)\)
 & Comparison & No & Yes \\
+Fredman \& Tarjan~{[}FT87{]} & \(O(m\,\beta(m,n))\) & Comparison & No &
+Limited \\
 Karger, Klein \& Tarjan~{[}KKT95{]} & \(O(m)\) expected & Comparison &
 Yes & Limited \\
 Chazelle~{[}Cha00{]} & \(O(m\ \alpha(m,\ n))\) & Comparison & No & No \\
 Pettie \& Ramachandran~{[}PR02{]} & \(O\left( T^{*}(m,n) \right)\) &
 Comparison & No & No \\
-BMSBoruvka (this work) & \(O\left( nlog^{\frac{2}{3}}n \right)\)
-{[}sparse{]} & RAM & No & Yes \\
-BMSBoruvka (this work) & \(O(m\ log\ n)\) {[}general{]} & RAM & No &
-Yes \\
+BMSBoruvka (this work) & \(O(m \log n)\); \(O(m \log^{2/3} n)\) under
+Condition (H) & RAM & No & Yes \\
 \end{longtable}
 
 \textbf{Classical algorithms} (\textbf{Borůvka}~{[}Bor26{]},
 \textbf{Kruskal}~{[}Kru56{]}, \textbf{Prim}~{[}Pri57{]}). The three
-textbook algorithms all run in \(O(m\ log\ n)\) or \(O(m + n\ log\ n)\)
+textbook algorithms all run in \(O(m \log n)\) or \(O(m + n \log n)\)
 time under the comparison model. Borůvka's algorithm~{[}Bor26{]}, the
 structural foundation of BMSBoruvka, iterates rounds in which every
 component simultaneously selects its cheapest outgoing edge; after ⌈log₂
 n⌉ rounds a single component remains. Kruskal's algorithm~{[}Kru56{]}
 sorts all edges once and greedily adds them in order, with cost
-dominated by the \(O(m\ log\ m)\) sort. Prim's algorithm~{[}Pri57{]},
+dominated by the \(O(m \log m)\) sort. Prim's algorithm~{[}Pri57{]},
 when implemented with a Fibonacci heap~{[}FT87{]}, achieves the best
-classical bound of \(O(m + n\ log\ n)\), which is tighter on dense
+classical bound of \(O(m + n \log n)\), which is tighter on dense
 graphs but equivalent to Borůvka on sparse ones where \(m\  = \ O(n)\).
 All three are straightforward to implement and have been standard in
-pedagogy and practice for decades. BMSBoruvka improves on all three for
-sparse graphs, achieving \(O\left( nlog^{\frac{2}{3}}n \right)\) versus
-the best classical bound of \(O(n\ log\ n)\) when \(m\  = \ O(n)\), an
-improvement by a factor of \({log}^{1/3}n\).
+pedagogy and practice for decades. Under Condition (H), BMSBoruvka
+runs in \(O(m \log^{2/3} n)\) and so improves on all three by a factor
+of \(\log^{1/3} n\); in the worst case it matches their \(O(m \log n)\)
+bound.
+
+\textbf{Fredman \& Tarjan} (1987)~{[}FT87{]}. Besides the
+\(O(m + n \log n)\) bound for Prim's algorithm, Fredman and Tarjan gave
+an MST algorithm running in \(O(m\,\beta(m,n))\) time, where
+\(\beta(m,n) = \min\{\, i : \log^{(i)} n \le m/n \,\}\). It grows Prim
+trees with a bounded heap size and contracts them between passes. For
+every graph in our experiments \(\beta(m,n) \le 2\), so the algorithm is
+effectively linear there and asymptotically faster than BMSBoruvka. It
+is rarely implemented in practice because Fibonacci heaps carry large
+constant factors. BMSBoruvka does not improve on this bound; its
+contribution is within Borůvka-style algorithms.
 
 \textbf{Karger, Klein \& Tarjan} (1995)~{[}KKT95{]}. Karger, Klein, and
 Tarjan gave the first linear-time MST algorithm, achieving \(O(m)\)
@@ -1158,13 +1274,12 @@ operation time. Despite its elegance, Chazelle's algorithm has never
 been implemented in practice: the soft heap introduces enormous constant
 factors, the algorithm is designed for a pointer machine rather than a
 standard RAM, and the correctness argument is extremely delicate.
-BMSBoruvka is asymptotically inferior to Chazelle on sparse graphs
-(\(O\left( nlog^{\frac{2}{3}}n \right)\) vs \(O(m\ \alpha(m,\ n))\)) but
-offers something Chazelle's algorithm does not: a working
+BMSBoruvka is asymptotically inferior to Chazelle
+(\(O(m \log^{2/3} n)\) under Condition (H) vs \(O(m\,\alpha(m,n))\))
+but offers something Chazelle's algorithm does not: a working
 implementation. Using only a DSU and std::nth\_element, BMSBoruvka
-achieves \(O\left( nlog^{\frac{2}{3}}n \right)\) on sparse graphs with a
-codebase under 400 lines of standard C++, verified correct on 3,000
-random test cases.
+achieves its bounds with a codebase under 400 lines of standard C++,
+verified correct on 3,000 random test cases.
 
 \textbf{Pettie \& Ramachandran} (2002)~{[}PR02{]}. Pettie and
 Ramachandran proved that the algorithmic complexity of MST equals its
@@ -1178,45 +1293,45 @@ the exact complexity of MST remains unknown. The algorithm is purely
 theoretical: it operates by precomputing optimal decision trees for all
 graphs up to a fixed size r, and the constant factor is exponential in
 r. No practical implementation exists or is expected. BMSBoruvka makes
-no claim to theoretical optimality, but its
-\(O\left( nlog^{\frac{2}{3}}n \right)\) sparse bound is derived
-rigorously, and the algorithm runs correctly on inputs of up to
+no claim to theoretical optimality, but its \(O(m \log n)\)
+worst-case bound and its \(O(m \log^{2/3} n)\) bound under Condition
+(H) are derived rigorously, and the algorithm runs correctly on inputs
+of up to
 \(n = 10^{6}\) vertices in under 3 seconds on commodity hardware.
 
 \subsection{Positioning of BMSBoruvka}
 
 The comparison above reveals a clear division in the MST algorithm
 landscape. On one side are the theoretically superior
-algorithms---Karger-Klein-Tarjan~{[}KKT95{]} (\(O(m)\) expected) and
-Chazelle~{[}Cha00{]} (\(O(m\ \alpha(m,\ n))\))---that achieve lower
+algorithms---Fredman-Tarjan~{[}FT87{]} (\(O(m\,\beta(m,n))\)),
+Karger-Klein-Tarjan~{[}KKT95{]} (\(O(m)\) expected) and
+Chazelle~{[}Cha00{]} (\(O(m\,\alpha(m,n))\))---that achieve lower
 asymptotic bounds but are either randomised, impractical to implement,
 or both. On the other side are the classical practical
 algorithms---Borůvka~{[}Bor26{]}, Kruskal~{[}Kru56{]}, and
 Prim~{[}Pri57{]}---that are widely deployed but plateau at
-\(O(m\ log\ n)\).
+\(O(m \log n)\).
 
-BMSBoruvka occupies a distinct middle position. For sparse graphs
-(\(m\  = \ O(n)\)), it achieves \(O\left( nlog^{\frac{2}{3}}n \right)\),
-which is asymptotically better than every classical algorithm and better
-than Prim on sparse graphs by a factor of \(log^{\frac{1}{3}}n\). It is
-deterministic, requires no random bits, and its implementation uses only
-standard data structures available in any modern programming
-environment. Empirically, it achieves 2.44× to 2.76× speedup over
-sequential Borůvka on sparse inputs (Section~5), and the normalised
-throughput \(\widehat{t}\) stabilises above n = 100,000, confirming that
-the \(O\left( nlog^{\frac{2}{3}}n \right)\) bound is empirically tight.
+BMSBoruvka occupies a distinct middle position. It keeps the
+\(O(m \log n)\) worst-case bound of Borůvka's algorithm, and under
+Condition (H) runs in \(O(m \log^{2/3} n)\), which is asymptotically
+better than every classical algorithm by a factor of
+\(\log^{1/3} n\). It is deterministic, requires no random bits, and its
+implementation uses only standard data structures available in any
+modern programming environment. Empirically, it is consistently faster
+than sequential Borůvka (Section~5)
+\textbf{[TBD: speedup range and comparison with Kruskal /
+Filter-Kruskal from the new runs]}.
 
-On general graphs, BMSBoruvka degrades to \(O(m\ log\ n)\), matching
-Borůvka~{[}Bor26{]}. This is expected: the \(log^{\frac{2}{3}}\)
-advantage arises specifically from graph compression on sparse inputs,
-where the compressed super-graph shrinks rapidly (Lemma~5). On dense
-graphs, Phase B cannot reduce the edge set significantly through
-compression, and the algorithm reverts to the same asymptotic regime as
+Without Condition (H), BMSBoruvka falls back to \(O(m \log n)\),
+matching Borůvka~{[}Bor26{]}. The \(\log^{1/3} n\) advantage comes from
+scanning each edge in few super-steps rather than in every round; when
+many edges are carried from one super-step to the next, each is scanned
+repeatedly and the algorithm reverts to the same asymptotic regime as
 its classical predecessors. This limitation is consistent with the
-behaviour of all known sub-\(O(m\ log\ n)\) MST algorithms: they either
-require randomness~({[}KKT95{]}) or are
-impractical~({[}Cha00{]},~{[}PR02{]}) to transcend the
-\(O(m\ log\ n)\ \)bound on dense inputs in a deployable form.
+behaviour of all known sub-\(O(m \log n)\) MST algorithms: they either
+require randomness~({[}KKT95{]}), rely on heavy data
+structures~({[}FT87{]}), or are impractical~({[}Cha00{]},~{[}PR02{]}).
 
 \section*{References}
 
@@ -1261,6 +1376,14 @@ trees. \emph{Journal of the ACM}, 42(2), 321--328.
 subtree of a graph and the traveling salesman problem. \emph{Proceedings
 of the American Mathematical Society}, 7(1), 48--50.
 \url{https://doi.org/10.1090/S0002-9939-1956-0078686-7}
+\smallskip
+
+
+\noindent \textbf{{[}OSS09{]}} Osipov, V., Sanders, P., \& Singler, J.
+(2009). The filter-Kruskal minimum spanning tree algorithm. In
+\emph{Proceedings of the Eleventh Workshop on Algorithm Engineering and
+Experiments (ALENEX)}, 52--61.
+\url{https://doi.org/10.1137/1.9781611972894.5}
 \smallskip
 
 

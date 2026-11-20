@@ -9,6 +9,7 @@ src/bms_xi
 src/kruskal
 src/filter_kruskal
 src/parallel_boruvka
+src/prim
 src/gen
 
 # Generated graphs (~600 MB) and benchmark output

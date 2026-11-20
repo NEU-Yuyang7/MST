@@ -53,6 +53,7 @@ If the command fails, review `results/smoke/run.log`. Do not add `--skip-verify`
 g++ -O2 -std=c++17 boruvka.cpp -o boruvka
 g++ -O2 -std=c++17 kruskal.cpp -o kruskal
 g++ -O2 -std=c++17 filter_kruskal.cpp -o filter_kruskal
+g++ -O2 -std=c++17 prim.cpp -o prim
 g++ -O2 -std=c++17 BMSBoruvka.cpp -o bms
 g++ -O2 -std=c++17 -fopenmp parallel_boruvka.cpp -o parallel_boruvka
 g++ -O2 -std=c++17 -DBMS_XI BMSBoruvka.cpp -o bms_xi

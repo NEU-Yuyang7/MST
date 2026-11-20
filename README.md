@@ -31,6 +31,7 @@ Or manually:
 g++ -O2 -std=c++17 boruvka.cpp          -o boruvka
 g++ -O2 -std=c++17 kruskal.cpp          -o kruskal
 g++ -O2 -std=c++17 filter_kruskal.cpp   -o filter_kruskal
+g++ -O2 -std=c++17 prim.cpp             -o prim
 g++ -O2 -std=c++17 BMSBoruvka.cpp       -o bms
 g++ -O2 -std=c++17 -fopenmp parallel_boruvka.cpp -o parallel_boruvka
 g++ -O2 -std=c++17 -DBMS_XI BMSBoruvka.cpp -o bms_xi
@@ -70,17 +71,24 @@ still reachable at these sizes.
 | `roothi_30k`   | 30,000    | 5,196,152  | 346.4 | d̄ = 2√n, dense                 |
 | `rootlo_100k`  | 100,000   | 7,905,694  | 158.1 | d̄ = √n/2                       |
 | `roothi_100k`  | 100,000   | 31,622,776 | 632.5 | d̄ = 2√n, dense                 |
-| `1m`           | 1,000,000 | 5,000,000  |  10.0 | weight-distribution control    |
-| `1m_ties`      | 1,000,000 | 5,000,000  |  10.0 | uniform weights (many ties)    |
-| `1m_small`     | 1,000,000 | 5,000,000  |  10.0 | small integer weights [1, 100] |
+| `logn_1m_ties` | 1,000,000 | 13,815,510 |  27.6 | d̄ = 2 ln n, uniform weights (many ties); control `logn_1m` |
+| `logn_1m_small`| 1,000,000 | 13,815,510 |  27.6 | d̄ = 2 ln n, small integer weights [1, 100]; control `logn_1m` |
+| `1m`           | 1,000,000 | 5,000,000  |  10.0 | legacy weight-distribution control |
+| `1m_ties`      | 1,000,000 | 5,000,000  |  10.0 | legacy: uniform weights (many ties) |
+| `1m_small`     | 1,000,000 | 5,000,000  |  10.0 | legacy: small integer weights [1, 100] |
 
 The `logn_*` series is the n-scaling series: one density regime, so t̂ across
 those rows varies with `n` alone. The `rootlo_*`/`roothi_*` pairs give a
 density sweep at fixed `n`, with the matching `logn_*` case as the third point.
 
-The last three sit at `d̄ = 10`, below `ln(10⁶) = 13.8`, and so are the only
-cases generated with `gen --connected`. They keep that density because the
-weight-distribution results are measured against `1m` as the control.
+`logn_1m_ties` and `logn_1m_small` are the weight-distribution cases. They
+share `logn_1m`'s density, and `logn_1m` is their random-weight control.
+
+The last three are the legacy weight-distribution cases at `d̄ = 10`, kept only
+for comparison with jobs 11742193 and 11805997. They sit below
+`ln(10⁶) = 13.8` and so are the only cases generated with `gen --connected`;
+that forced path means they are not uniform random graphs. Quote the
+`logn_1m_*` results, not these.
 
 ### 3. Run benchmark
 
@@ -153,7 +161,7 @@ All written to `--output-dir` (default `./results/`):
 | File               | Contents                                                     |
 | ------------------ | ------------------------------------------------------------ |
 | `bench_timing.csv` | Per-(size, algorithm): mean\_ms (MST construction only), min, max, σ, parse\_ms, wall\_total\_ms, t̂, vs\_boruvka ratio, vs\_bms ratio |
-| `bench_xi.csv`     | Per-(size, algorithm, repeat): ξ\_μ, ξ\_theory, steps/rounds, per-step ξ sequence |
+| `bench_xi.csv`     | Per-(size, algorithm, seed, repeat): ξ\_full (geometric mean of the non-final steps), min ξ\_full, ξ\_theory, actual steps/rounds, theory step count P (bms), per-step ξ sequence. `xi_geomean_all_steps` is kept for reference only: it is n^(1/steps) by construction |
 | `bench_report.md`  | Human-readable Markdown report with ξ table, timing table, and convergence analysis |
 
 ## Project Structure
@@ -169,6 +177,7 @@ project/
 |   |-- gen.cpp                  # Random graph generator
 |   |-- kruskal.cpp              # Standard Kruskal
 |   |-- parallel_boruvka.cpp     # Parallel Borůvka
+|   |-- prim.cpp                 # Prim with a binary heap
 |   |-- convert_snap.py          # Convert SNAP road-network format to bench input
 |   |-- run_bench.py             # Benchmark driver (build / gen / time / ξ / report)
 |
