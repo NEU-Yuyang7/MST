@@ -398,6 +398,8 @@ def xi_summary(xi_rows, tag, algo):
       theory    ξ_theory (2^t for bms, 2 for boruvka)
       t         the bms t parameter
       scan      mean edge scans per input edge (see scan_per_edge)
+      carry     largest m'_i (edges carried into the next super-step), bms
+      carry_c   largest m'_i / A_i, the constant c of Condition (H), bms
     """
     rs = [r for r in xi_rows if r["tag"] == tag and r["algo"] == algo]
     if not rs:
@@ -405,6 +407,10 @@ def xi_summary(xi_rows, tag, algo):
     gms  = [g for g in (geomean(xi_full(r)) for r in rs) if g is not None]
     mins = [min(xi_full(r)) for r in rs if xi_full(r)]
     work = [w for w in (scan_per_edge(r) for r in rs) if w is not None]
+    carried = [c for r in rs for c in (r.get("carry_trace") or [])]
+    ratios  = [c / a for r in rs
+               for c, a in zip(r.get("carry_trace") or [], r.get("carry_comps") or [])
+               if a > 0]
     return {
         "steps":    fmt_range([steps_of(r) for r in rs]),
         "P":        fmt_range([r.get("P") for r in rs]),
@@ -413,6 +419,8 @@ def xi_summary(xi_rows, tag, algo):
         "theory":   rs[0].get("xi_theory"),
         "t":        rs[0].get("t", ""),
         "scan":     statistics.mean(work) if work else None,
+        "carry":    max(carried) if carried else None,
+        "carry_c":  max(ratios) if ratios else None,
     }
 
 
@@ -742,6 +750,8 @@ def collect_xi(cases, n_repeats=3):
                         "xi_theory":    summary.get("xi_theory"),     # 2^t
                         "C_trace":      summary.get("C_trace", []),
                         "M_trace":      summary.get("M_trace", []),
+                        "carry_trace":  summary.get("carry_trace", []),
+                        "carry_comps":  summary.get("carry_comps", []),
                         "xi_per_step":  [s["xi"] for s in steps],
                     })
 
@@ -845,6 +855,7 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
             "steps_or_rounds", "steps_theory_P", "t",
             "xi_geomean_all_steps", "xi_sequence",
             "M_sequence", "scan_per_edge",
+            "carry_sequence", "carry_comps_sequence",
         ])
         for r in xi_rows:
             steps = steps_of(r)
@@ -863,6 +874,8 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
                 json.dumps([round(x, 4) for x in seq]),
                 json.dumps(r.get("M_trace", [])) if r["algo"] == "bms" else "",
                 f"{scan_per_edge(r):.3f}" if scan_per_edge(r) is not None else "",
+                json.dumps(r.get("carry_trace", [])) if r["algo"] == "bms" else "",
+                json.dumps(r.get("carry_comps", [])) if r["algo"] == "bms" else "",
             ])
     log(f"Xi CSV        → {xi_csv}")
 
@@ -891,6 +904,10 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
     A("N/A          only one step, so no full step to measure")
     A("Scans/edge   bms: t · Σ M_i / m  (M_i = edges entering step i; upper bound)")
     A("             boruvka: rounds     (each round scans all m edges)")
+    A("Carried      bms: largest m'_i, edges carried from a super-step into the")
+    A("             next after compression; c = largest m'_i / A_i, A_i = the")
+    A("             components those edges touch. Condition (H) of the analysis")
+    A("             asks m'_i <= c * A_i for a constant c; 0 carried satisfies it.")
     A("```\n")
 
     A("### t̂ — Normalised Throughput (ops/ms)\n")
@@ -932,9 +949,11 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
       "ξ_full is averaged over instances; min ξ_full is the smallest seen. "
       "Scans/edge is edge work per input edge: t·ΣM_i/m for bms (an upper "
       "bound; M_i is the edge list entering step i), rounds for boruvka "
-      "(each round scans all m edges). Like ξ it depends only on the graph.*\n")
-    A("| Size | n | m | algo | Steps | Steps (theory P) | ξ_full | min ξ_full | ξ_theory | t | Scans/edge |")
-    A("|------|---|---|------|-------|------------------|--------|------------|----------|---|------------|")
+      "(each round scans all m edges). Carried is the largest number of edges "
+      "carried into a following super-step (bms), c the largest carried/"
+      "components ratio. Like ξ these depend only on the graph.*\n")
+    A("| Size | n | m | algo | Steps | Steps (theory P) | ξ_full | min ξ_full | ξ_theory | t | Scans/edge | Carried | c |")
+    A("|------|---|---|------|-------|------------------|--------|------------|----------|---|------------|---------|---|")
 
     def _f(x):
         return f"{x:.2f}" if isinstance(x, (int, float)) else "N/A"
@@ -948,10 +967,13 @@ def write_outputs(cases, bins, timing_results, trials, xi_rows, out_dir):
                 continue
             th = sm["theory"]
             th_s = f"{th:.1f}" if isinstance(th, (int, float)) else str(th or "")
+            carry_s   = "" if sm["carry"]   is None else f"{sm['carry']:,}"
+            carry_c_s = "" if sm["carry_c"] is None else f"{sm['carry_c']:.2f}"
             A(f"| {tag} | {n:,} | {m:,} | {algo} | {sm['steps']} "
               f"| {sm['P'] or '—'} | **{_f(sm['full_gm'])}** "
-              f"| {_f(sm['full_min'])} | {th_s} | {sm['t']} | {_f(sm['scan'])} |")
-        A("| | | | | | | | | | | |")
+              f"| {_f(sm['full_min'])} | {th_s} | {sm['t']} | {_f(sm['scan'])} "
+              f"| {carry_s} | {carry_c_s} |")
+        A("| | | | | | | | | | | | | |")
 
     A("\n## t̂ and Timing Results\n")
     A("*Mean (ms) is MST construction only, measured inside each binary with "

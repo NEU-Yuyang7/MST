@@ -339,6 +339,12 @@ struct BMSBoruvka {
     vector<double> xi_per_step;
     vector<int> C_trace;   // component count at start of each super-step
     vector<int> M_trace;   // curEdges size entering Phase B each super-step
+    // Edges carried from a super-step into the next (m'_i, after compression)
+    // and the number of components they touch (A_i). Condition (H) of the
+    // paper asks m'_i <= c * A_i; one entry per super-step that reached
+    // Phase C.
+    vector<int> carry_trace;
+    vector<int> carry_comps;
 #endif
 
     explicit BMSBoruvka(int n_, vector<Edge> E,
@@ -468,12 +474,28 @@ struct BMSBoruvka {
                 }
 
                 if (curEdges.empty()) {
+#ifdef BMS_XI
+                    carry_trace.push_back(0);
+                    carry_comps.push_back(0);
+#endif
                     if (curActivated == m) break;   // nothing left to merge (MSF)
                     continue;
                 }
 
                 // compress O(m_i)
                 auto res = compressor.compress(uf, curEdges);
+#ifdef BMS_XI
+                {
+                    vector<char> touched(res.n_nodes, 0);
+                    int A = 0;
+                    for (const auto& e : res.edges) {
+                        if (!touched[e.u]) { touched[e.u] = 1; A++; }
+                        if (!touched[e.v]) { touched[e.v] = 1; A++; }
+                    }
+                    carry_trace.push_back((int)res.edges.size());
+                    carry_comps.push_back(A);
+                }
+#endif
 
                 // rootToNew remains valid until resetRootToNew() is called
                 for (int origNode = 0; origNode < n_orig; origNode++) {
@@ -571,6 +593,12 @@ int main(int argc, char** argv) {
     fprintf(stderr, "],\"M_trace\":[");
     for (size_t i = 0; i < solver->M_trace.size(); i++)
         fprintf(stderr, "%s%d", i ? "," : "", solver->M_trace[i]);
+    fprintf(stderr, "],\"carry_trace\":[");
+    for (size_t i = 0; i < solver->carry_trace.size(); i++)
+        fprintf(stderr, "%s%d", i ? "," : "", solver->carry_trace[i]);
+    fprintf(stderr, "],\"carry_comps\":[");
+    for (size_t i = 0; i < solver->carry_comps.size(); i++)
+        fprintf(stderr, "%s%d", i ? "," : "", solver->carry_comps[i]);
     fprintf(stderr, "]}\n");
 #endif
 
